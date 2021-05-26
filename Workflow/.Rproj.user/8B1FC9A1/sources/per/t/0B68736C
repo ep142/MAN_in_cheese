@@ -1,0 +1,28 @@
+{
+    "id": "0B68736C",
+    "path": "~/Google Drive (eugenio.parente@unibas.it)/GitHub_repos/Microbial_Association_Networks_Cheese/Workflow/MAN_NetCoMi_FMBN_genus_example.Rmd",
+    "project_path": null,
+    "type": "r_markdown",
+    "hash": "4270876007",
+    "contents": "",
+    "dirty": false,
+    "created": 1622034219535.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "chunk_output_type": "inline",
+        "source_window_id": "",
+        "Source": "Source",
+        "last_setup_crc32": "5E6121AB74e4e17b",
+        "cursorPosition": "1166,546",
+        "scrollLine": "1162"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1622036212,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1622036212392,
+    "read_only": false,
+    "read_only_alternatives": []
+}

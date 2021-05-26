@@ -1,0 +1,303 @@
+"0","knitr::opts_chunk$set(echo = TRUE)"
+"0",""
+"0","# Install/load packages ---------------------------------------------------"
+"0",""
+"0",".bioc_packages <- c(""BiocManager"", ""genefilter"", ""phyloseq"")"
+"0",".cran_packages <- c(""devtools"", ""parallel"", ""tidyverse"", ""igraph"", "
+"0","                    ""VennDiagram"", ""tidygraph"", ""lobstr"", ""tictoc"", ""beepr"","
+"0","                    ""psych"", ""GGally"", ""ggrepel"", ""ggraph"", ""egg"", ""epiR"")"
+"0",".github_packages <- c(""SpiecEasi"",""NetCoMi"")"
+"0","# lobstr is called for lobstr::obj_size()"
+"0","# egg is only used to arrange plots in grids"
+"0",""
+"0",".inst <- .bioc_packages %in% installed.packages()"
+"0","if(any(!.inst)) {"
+"0","  if(!.inst[1]) {"
+"0","    install.packages(""BiocManager"")"
+"0","    .inst <- .bioc_packages %in% installed.packages()"
+"0","    }"
+"0","  if(any(!.inst[2:length(.inst)])) {"
+"0","    BiocManager::install(.bioc_packages[!.inst], ask = F)"
+"0","    }"
+"0","}"
+"0",""
+"0",".inst <- .cran_packages %in% installed.packages()"
+"0","if(any(!.inst)) {"
+"0","  install.packages(.cran_packages[!.inst])"
+"0","}"
+"0",""
+"0",".inst <- .github_packages %in% installed.packages()"
+"0",""
+"0","# careful now, because the installation of NetCoMi can be buggy"
+"0","# it usually fails because if fails to install one of the missing dependencies,"
+"0","# if any. If this happens, install the dependencies first..."
+"0",""
+"0","if(any(!.inst)){"
+"0","  require(devtools)"
+"0","  if(!.inst[1]) devtools::install_github(""zdk123/SpiecEasi"")"
+"0","  if(!.inst[2]) devtools::install_github(""stefpeschel/NetCoMi"", "
+"0","                                         dependencies = TRUE,"
+"0","                                         repos = c(""https://cloud.r-project.org/"","
+"0","                                                   BiocManager::repositories()))"
+"0","}"
+"0",""
+"0","# Load packages into session, and print package version"
+"0","sapply(c(.cran_packages, .bioc_packages, .github_packages), require, character.only = TRUE)"
+"2","Loading required package: devtools
+"
+"2","Loading required package: usethis
+"
+"2","Loading required package: parallel
+"
+"2","Loading required package: tidyverse
+"
+"2","Registered S3 methods overwritten by 'dbplyr':
+  method         from
+  print.tbl_lazy     
+  print.tbl_sql      
+"
+"2","[30m── [1mAttaching packages[22m ────────────────────────────────────────────────────────────────────────────── tidyverse 1.3.1 ──[39m
+"
+"2","[30m[32m✓[30m [34mggplot2[30m 3.3.3     [32m✓[30m [34mpurrr  [30m 0.3.4
+[32m✓[30m [34mtibble [30m 3.1.1     [32m✓[30m [34mdplyr  [30m 1.0.5
+[32m✓[30m [34mtidyr  [30m 1.1.3     [32m✓[30m [34mstringr[30m 1.4.0
+[32m✓[30m [34mreadr  [30m 1.4.0     [32m✓[30m [34mforcats[30m 0.5.1[39m
+"
+"2","[30m── [1mConflicts[22m ───────────────────────────────────────────────────────────────────────────────── tidyverse_conflicts() ──
+[31mx[30m [34mdplyr[30m::[32mfilter()[30m masks [34mstats[30m::filter()
+[31mx[30m [34mdplyr[30m::[32mlag()[30m    masks [34mstats[30m::lag()[39m
+"
+"2","Loading required package: igraph
+"
+"2","
+Attaching package: ‘igraph’
+
+"
+"2","The following objects are masked from ‘package:dplyr’:
+
+    as_data_frame, groups, union
+
+"
+"2","The following objects are masked from ‘package:purrr’:
+
+    compose, simplify
+
+"
+"2","The following object is masked from ‘package:tidyr’:
+
+    crossing
+
+"
+"2","The following object is masked from ‘package:tibble’:
+
+    as_data_frame
+
+"
+"2","The following objects are masked from ‘package:stats’:
+
+    decompose, spectrum
+
+"
+"2","The following object is masked from ‘package:base’:
+
+    union
+
+"
+"2","Loading required package: VennDiagram
+"
+"2","Loading required package: grid
+"
+"2","Loading required package: futile.logger
+"
+"2","Loading required package: tidygraph
+"
+"2","
+Attaching package: ‘tidygraph’
+
+"
+"2","The following object is masked from ‘package:igraph’:
+
+    groups
+
+"
+"2","The following object is masked from ‘package:stats’:
+
+    filter
+
+"
+"2","Loading required package: lobstr
+"
+"2","Loading required package: tictoc
+"
+"2","Loading required package: beepr
+"
+"2","Loading required package: psych
+"
+"2","
+Attaching package: ‘psych’
+
+"
+"2","The following objects are masked from ‘package:ggplot2’:
+
+    %+%, alpha
+
+"
+"2","Loading required package: GGally
+"
+"2","Registered S3 method overwritten by 'GGally':
+  method from   
+  +.gg   ggplot2
+"
+"2","Loading required package: ggrepel
+"
+"2","Loading required package: ggraph
+"
+"2","Loading required package: egg
+"
+"2","Loading required package: gridExtra
+"
+"2","
+Attaching package: ‘gridExtra’
+
+"
+"2","The following object is masked from ‘package:dplyr’:
+
+    combine
+
+"
+"2","Loading required package: epiR
+"
+"2","Loading required package: survival
+"
+"2","Package epiR 2.0.19 is loaded
+"
+"2","Type help(epi.about) for summary information
+"
+"2","Type browseVignettes(package = 'epiR') to learn how to use epiR for applied epidemiological analyses
+"
+"2","
+
+"
+"2","Loading required package: BiocManager
+"
+"2","
+Attaching package: ‘BiocManager’
+
+"
+"2","The following object is masked from ‘package:devtools’:
+
+    install
+
+"
+"2","Loading required package: genefilter
+"
+"2","
+Attaching package: ‘genefilter’
+
+"
+"2","The following object is masked from ‘package:psych’:
+
+    AUC
+
+"
+"2","The following object is masked from ‘package:readr’:
+
+    spec
+
+"
+"2","Loading required package: phyloseq
+"
+"2","Registered S3 method overwritten by 'data.table':
+  method           from
+  print.data.table     
+"
+"2","Loading required package: SpiecEasi
+"
+"2","
+Attaching package: ‘SpiecEasi’
+
+"
+"2","The following objects are masked from ‘package:psych’:
+
+    cor2cov, shannon
+
+"
+"2","The following object is masked from ‘package:igraph’:
+
+    make_graph
+
+"
+"2","Loading required package: NetCoMi
+"
+"2","
+"
+"2","Registered S3 method overwritten by 'htmlwidgets':
+  method           from         
+  print.htmlwidget tools:rstudio
+"
+"1","   devtools "
+"1","   parallel "
+"1","  tidyverse "
+"1","     igraph "
+"1","VennDiagram "
+"1","  tidygraph "
+"1","     lobstr "
+"1","     tictoc "
+"1","      beepr "
+"1","
+"
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","
+"
+"1","      psych "
+"1","     GGally "
+"1","    ggrepel "
+"1","     ggraph "
+"1","        egg "
+"1","       epiR "
+"1","BiocManager "
+"1"," genefilter "
+"1","   phyloseq "
+"1","
+"
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","       TRUE "
+"1","
+"
+"1","  SpiecEasi "
+"1","    NetCoMi "
+"1","
+"
+"1","       TRUE "
+"1","       TRUE "
+"1","
+"
+"0","# other setup operations"
+"0","opar <- par(no.readonly=TRUE) "
+"0","par(ask=F) "
+"0","# set.seed(1234) "
+"0","# play audio notifications"
+"0","play_audio <- T"
+"0","# time important steps"
+"0","keep_time <- T"
+"0","# verbose output: will print additional objects and messages"
+"0","verbose_output <- T"
+"0",""
+"0","# load the functions and return a report"
+"0","source(file.path(""source"",""MAN_functions.R""))"
+"0","if(play_audio) beep(sound = 6) # notification"

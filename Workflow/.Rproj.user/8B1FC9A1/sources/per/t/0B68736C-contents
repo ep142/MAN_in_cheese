@@ -1,0 +1,1528 @@
+---
+title: "Inference and comparison of microbial association networks"
+subtitle: "Inferring networks from FMBN data, genus level, part 3 (and example workflow"
+author: "E. Parente, SAFE"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_notebook:
+    toc: yes
+    toc_float: yes
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Install/load packages ---------------------------------------------------
+
+.bioc_packages <- c("BiocManager", "genefilter", "phyloseq")
+.cran_packages <- c("devtools", "parallel", "tidyverse", "igraph", 
+                    "VennDiagram", "tidygraph", "lobstr", "tictoc", "beepr",
+                    "psych", "GGally", "ggrepel", "ggraph", "egg", "epiR")
+.github_packages <- c("SpiecEasi","NetCoMi")
+# lobstr is called for lobstr::obj_size()
+# egg is only used to arrange plots in grids
+
+.inst <- .bioc_packages %in% installed.packages()
+if(any(!.inst)) {
+  if(!.inst[1]) {
+    install.packages("BiocManager")
+    .inst <- .bioc_packages %in% installed.packages()
+    }
+  if(any(!.inst[2:length(.inst)])) {
+    BiocManager::install(.bioc_packages[!.inst], ask = F)
+    }
+}
+
+.inst <- .cran_packages %in% installed.packages()
+if(any(!.inst)) {
+  install.packages(.cran_packages[!.inst])
+}
+
+.inst <- .github_packages %in% installed.packages()
+
+# careful now, because the installation of NetCoMi can be buggy
+# it usually fails because if fails to install one of the missing dependencies,
+# if any. If this happens, install the dependencies first...
+
+if(any(!.inst)){
+  require(devtools)
+  if(!.inst[1]) devtools::install_github("zdk123/SpiecEasi")
+  if(!.inst[2]) devtools::install_github("stefpeschel/NetCoMi", 
+                                         dependencies = TRUE,
+                                         repos = c("https://cloud.r-project.org/",
+                                                   BiocManager::repositories()))
+}
+
+# Load packages into session, and print package version
+sapply(c(.cran_packages, .bioc_packages, .github_packages), require, character.only = TRUE)
+
+# other setup operations
+opar <- par(no.readonly=TRUE) 
+par(ask=F) 
+# set.seed(1234) 
+# play audio notifications
+play_audio <- T
+# time important steps
+keep_time <- T
+# verbose output: will print additional objects and messages
+verbose_output <- T
+
+# load the functions and return a report
+source(file.path("source","MAN_functions.R"))
+if(play_audio) beep(sound = 6) # notification
+```
+
+# Introduction.  
+
+This notebook reports on the inference of microbial association networks from meta-taxonomic data extracted from [DairyFMBN](http://dx.doi.org/10.17632/3cwf729p34.3) using package [NetCoMi](https://github.com/stefpeschel/NetCoMi), after some pre-processing carried out mostly with package [phyloseq](https://joey711.github.io/phyloseq/).  
+
+The objective of this analysis is:  
+
+* infer microbial association networks (at the genus level) for selected cheese studies stored in DairyFMBN usign different inference methods  
+
+* identify associations which are conserved across methods  
+
+* compare different inference methods 
+
+* identify and compare hubs in different networks
+  
+The data used in this script include studies from FMBN versions 3.2, with different platforms and target, but analyzed using the same pipeline based on DADA2. The script is designed to work with phyloseq objects extracted from FoodMicrobionet or DairyFMBN using the ShinyFMBN app DairyFMBN can be downloaded from [Mendeley data](https://data.mendeley.com/datasets/3cwf729p34/3): new versions are due soon.  
+The script will also work correctly with phyloseq objects generated using the DADA2 [BioConductor pipeline](https://benjjneb.github.io/dada2/tutorial.html) but the use of SILVA as a taxonomic database is advisable.  With some adaptations the script may work with phyloseq objects generated using other pipelines.  
+
+# Analysis workflow.  
+
+1. **start from n (n>1) `phyloseq` objects**. In this analysis I will use phyloseq objects extracted from DairyFMBN (which, in turn, includes all studies on dairy products stored in FoodMicrobionet). Although pooling at the genus level is likely to muddle some interactions, it it the only reasonable choice when comparing studies with vastly different targets, sequencing platforms, bioinformatic pilelines, etc. 
+
+2. **perform data-wrangling with phyloseq functions (mostly)**. There are a number of basic operations which should be performed:  
+
+    + remove samples with a low number of sequences (`minseq`) using the prune_samples() functions (and perhaps skip the analysis if there is less than min_samples). Note that sample and taxonomic filtering can be also performed within the `NetCoMi::netConstruct()` function
+  
+    + remove _Eukaryota_ and _Chloroplasts_ using subset_taxa()
+  
+    + remove taxa with ambiguous identification or poor identification (say at the domain or phylum level)
+  
+    + perform prevalence and abundance filtering (prevalence above min_prev AND abundance above min_rel_ab), possibly using `filter_taxa()`
+  
+    + return some sort of summary for what has been done and the effect on the original table (in terms of loss of taxa, sequences, samples), including some measure of diversity and evenness  
+  
+3. **perform microbial association network inference with `netConstruct()`** with some error trapping and store results in a list. This example uses the following inference methods:  
+
+    + **SparCC** (sparcc() in SpiecEasi package): needs high number of taxa and sparse matrix  
+    
+    + **CCREPE** (ccrepe package, it is the main approach used in CoNet)  
+    
+    + **SpiecEasi** (SpiecEasi package)  
+    
+    + **SPRING** (SPRING package)  
+
+4. **get nodes, edges and network stats**: use NetCoMi::netAnalyze() to get an object with both node and network stats; print a summary for network stats; build a tidygraph object for further stats; build tidy data frames with relevant stats; 
+
+The script is esigned to save data and amny of the plots in a subfolder (here "netcompare_output").  
+
+# The analysis.
+
+## Setting the options.  
+
+A number of options pertaining to the analysis or rlated to save operations can be set in the chunk below and will be saved and printed. 
+  
+```{r setting_options, echo=FALSE}
+
+### processing and folders ###
+# the following command detects the number of cores on UNIX/MacOS
+ncores <- parallel::detectCores(logical = F) # to detect physical cores in MacOS
+# the name of the folder containing the phyloseq objects
+data_folder <- "input_data"
+# the name of the folder containing additional functions + optional data (like the lookup table)
+source_folder <- "source"
+# the name of the output folder
+output_folder <- "netcompare_output"
+process_batch <- T
+# if true, all phyloseqs in the subfolder physeqobj will be processed in batch (may take time)
+
+# some graph options, shared everywhere
+dpi_option <- 300
+g_type <- "tiff" 
+
+# use a lookup table to fix the genera and families for Lactobacillales
+use_lookup <- T
+if(use_lookup){
+  lookup_table <- read_tsv(file.path("source", "lookup_lactobacillus.txt"), col_types = "cccccc")
+}
+
+out_filename_pref <- "MAN_FMBN_genus_3" # the prefix which will be used for all output filenames
+
+### filtering options ###
+min_samples <- 20
+# the minimum number of samples in the data set: studies with < min_samples after filtering will be excluded from the analysis
+min_seqs <- 1000
+# the minimum number of sequences per sample
+
+# removes uncharacterized taxa (i.e. taxa missing the identification at the phylum level or above)
+rm_unchar <- T
+# remove Eukaryota
+rm_euk <- T
+# remove chlorophalsts and mitochondria
+rm_chlmit <- T
+# taxonomic agglomeration options: "none" means no aggregation; if the input data are ASVs or OTUs they will be used as such
+# if the input file is from FMBN data in the original datasets are aggregated at different taxonomic levels.
+# when comparing datasets obtained using different gene targets or pipelines should be set to "genus"
+# "none", "genus", or "family"); do not use species, will most likely cause errors
+taxglom <- "genus" # tax glom will be performed at the genus level
+# remove taxa which are uncharacterized at the family, order and class level (should not be very many in most datasets)
+above_genus_flag <- T
+# prevalence and abundance filter
+# flag to decide if OTU should be filtered, i.e. if the filter is to be applied at all
+filterOTUs <- TRUE
+# flag to set the application of a prevalence filter
+prev_filter <- TRUE
+# the threshold of the filter, as fraction of samples
+prev_threshold <- 0.05
+# the abundance as fraction of sequences (in at least one sample)
+ab_threshold <- 0.005
+pass_both <- TRUE 
+# if true an OTU must pass both abundance and prevalence filter, otherwise
+# passing either is enough
+# options for saving output of prevalence and abundance filter
+save_prev_ab_plot <- T
+# flag for saving the prev ab plot
+print_prev_ab_plot <- F
+# flag for printing the plot
+save_prev_table <-T 
+# flag for saving the prevalence and abundance table; should be saved because it can be used later
+# to add info to the node stats
+save_prev_ab_list <-T
+
+# a vector with the methods used for inference, use the spelling used in `netConstruct()`
+# seeNetCoMi documentation for a lsit of available methods and options;
+# the first method is the one which will be used to do comparisons within sample
+# if you want to run just one list only that
+
+inf_methods <- c("spieceasi", "spring", "sparcc", "ccrepe")
+
+# the list of parameters to be passed in `netConstruct()` for each of the methods;
+# there must be one entry for each of he parameters in the list
+# some parameters are not really needed and will be ignored
+inf_methods_param <- list(
+  spieaceasi = list(
+    sparMethod = "t-test",
+    alpha = 0.001,
+    measureParList = list(
+      method = 'mb',
+      lambda.min.ratio = 1e-2,
+      nlambda = 20,
+      pulsar.params = list(rep.num =
+                             50)
+    ),
+    normmethodPar = "none",
+    zeromethodPar = "none",
+    dissFuncPar = "signed",
+    verbosePar = 1
+  ),
+  spring = list(
+    sparMethod = "t-test",
+    alpha = 0.001,
+    measureParList = list(nlambda = 50, rep.num = 50),
+        normmethodPar = "none",
+    zeromethodPar = "none",
+    dissFuncPar = "signed",
+    verbosePar = 1
+  ),
+  sparcc = list(
+    sparMethod = "t-test",
+    alpha = 0.001,
+    measureParList = list(iter = 100, inner_it = 20, th = 0.05),
+    normmethodPar = "none",
+    zeromethodPar = "none",
+    dissFuncPar = "signed",
+    verbosePar = 1
+  ),
+  ccrepe = list(
+    sparMethod = "t-test",
+    alpha = 0.001,
+    measureParList = NULL,
+    normmethodPar = "fractions",
+    zeromethodPar = "none",
+    dissFuncPar = "signed",
+    verbosePar = 1
+  )
+)
+
+# options for network analysis
+# do Venn plot
+do_Venn <- T
+# calculates edge betweenness
+calc_e_betw <-T
+# merge node stats
+merge_node_stats <- T
+
+# build and save a list with the options, for reproducibility
+option_list <- list(
+  general_options = list(
+    ncores = ncores,
+    data_folder = data_folder,
+    source_folder = source_folder,
+    output_folder = output_folder,
+    process_batch = process_batch,
+    use_lookup = use_lookup,
+    out_filenames = out_filename_pref,
+    gres = dpi_option,
+    gtype = g_type
+  ),
+  methods_options = list(
+    methods = inf_methods,
+    parameters = inf_methods_param
+  ),
+  filtering_options = list(
+    min_samples = min_samples,
+    min_seqs = min_seqs,
+    glom_taxa = taxglom,
+    rmunchar_dp = rm_unchar,
+    rmchlmit = rm_chlmit,
+    rmeuk = rm_euk,
+    rmunchar_cof = above_genus_flag,
+    filter_OTUs = filterOTUs,
+    prevfilter = prev_filter,
+    prevthreshold = prev_threshold,
+    abthreshols = ab_threshold,
+    passboth = pass_both,
+    saveprevabplot = save_prev_ab_plot, 
+    printprevabplot = print_prev_ab_plot,
+    saveprevabtable = save_prev_table,
+    save_prev_ab_list = save_prev_ab_list
+  ),
+  netstat_options = list(
+    doVenn = do_Venn,
+    calcEbetw = calc_e_betw,
+    mergeNstats = merge_node_stats
+  )
+)
+
+save(option_list, file = file.path(output_folder, paste(out_filename_pref,"_options.Rdata")))
+
+
+ext_functions <- print_function_report()
+if(verbose_output) {
+  print(ext_functions)
+  print(option_list)
+  }
+
+if(play_audio) beep(sound = 6) # notification
+
+
+```
+## Loading the objects to process.  
+
+The input data are stored in a folder (input_data) and processed one by one (depending on user input) or in batch (see process_batch option). The folder should also contain a .tsv with study metadata, with a label variable with the number of the study and an indicator on the nature of the file (FMBN or, if the accn number is in the name, ASV). Here I am loading 5 studies from DairyFMBN (ST106, ST110, ST115, ST131, ST136). The studies differ in the targets (ST106 targets V1-V3 RNA, the others the 16S RNA gene, V4 or V3-V4) and platform. Look at the example files to see how the study_metadata file should be setup.   
+
+```{r load_input_data, echo = FALSE}
+
+if(keep_time) tic("loading phyloseq objects")
+# obtain the list of files in the input folder
+input_file_list <- list.files(file.path(data_folder))
+# manage .rdata files first (but they must be phyloseq objects or will be deleted later)
+rdata_input_file_list <- input_file_list[str_detect(input_file_list, ".rdata|.Rdata|.RDATA")] 
+# get the list .Rdata
+rdata_names_list <- str_remove(rdata_input_file_list, ".rdata|.Rdata|.RDATA")
+rdata_path_list <- file.path(data_folder,rdata_input_file_list)
+# load and save as .rds, remove objects and files
+for (i in seq_along(rdata_path_list)){
+  load(rdata_path_list[i]) # loads the object as physeqdata
+  saveRDS(physeqdata, file.path(data_folder, paste(rdata_names_list[i],".rds",sep="")))
+  rm(physeqdata)
+  file.remove(rdata_path_list[i])
+}
+
+# get the names for the .rds files
+
+input_file_list <- list.files(file.path(data_folder))
+rds_input_file_list <- input_file_list[str_detect(input_file_list, ".rds|.RDS")] 
+names_list <- str_remove(rds_input_file_list, ".rds|.RDS")
+rds_path_list <- file.path(data_folder,rds_input_file_list)
+# load all the files in a list using a functional
+physeq_list <- lapply(rds_path_list, readRDS)
+# check if all are phyloseq objects
+is_phyloseq <- sapply(physeq_list, function(x) class(x)=="phyloseq")
+# clean up the list if necessary and give names
+physeq_list <- physeq_list[is_phyloseq]
+names(physeq_list) <- names_list[is_phyloseq]
+# if process_batch == F need to indicate which is to be processed; defaults to the first element of the list
+# so, it is easier if you just have one element in the folder
+item_to_process <- item <- NA_integer_
+if(!process_batch) {item <- ifelse(is.na(item_to_process), 1, item_to_process)}
+if(!is.na(item)){
+  physeq_list <- physeq_list[item]
+  }
+
+
+# should check if this is too large
+# size_limit 
+size_limit <- 500e6L
+physeq_size <- obj_size(physeq_list)
+size_warning <- ifelse(as.numeric(physeq_size)>size_limit,
+                       "WARNING: too much data to process",
+                       paste("object size", as.character(physeq_size), " B", sep = " ")) 
+# load the study metadata (if not available or not properly formatted the script will create a suitable data frame)
+# no input required, should work with defaults
+study_metadata <- load_metadata()
+# print the study metadata
+study_metadata %>% 
+  dplyr::select(label:studyId, samples, short_descr, type, ref_short)
+
+loading_report <- tibble( objects_to_process = c(names_list,size_warning))
+if(verbose_output) print(loading_report)
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+
+```
+
+## Filtering.  
+
+Filtering optionally filters samples and taxa (on the basis of taxonomy and of a prevalence and abundance filter) and returns the filtered `phyloseq` objects in a separate list. Taxonomic agglomeration is optionally carried out. The options for filtering are those defined in the options section.  
+
+### Filter samples.  
+
+Samples with less than a given number of sequences are discarded first. As a consequence, a given `phyloseq` object may fall out below the set minimum of samples. Therefore the number of samples per object is checked again.
+
+```{r filter_and_glom_samples, dpi = 96}
+if(keep_time) tic("filter and glom samples")
+# first prune objects with less than min_seqs sequences
+physeq_list_0  <- physeq_list
+# create first step of the filtering report
+filtering_report <- vector("list", length = length(physeq_list))
+filtering_report_0 <- map(physeq_list, report_step_0)
+for(i in seq_along(physeq_list)){
+  cat("processing ", i, " of ", length(physeq_list), "\n")
+  # set plot_ecdf=F for faster execution
+  physeq_list_0[[i]] <- prune_samples_by_size(physeq_list[[i]],
+                                              names(physeq_list)[i], 
+                                              plot_ecdf = F, 
+                                              minseqs = min_seqs)
+}
+cat("...done pruning samples...\n")
+# now recheck if all objects have enough samples
+physeq_list_1 <- rem_low_sample_obj(physeq_list_0, ms = min_samples)
+# create second step of the filtering report
+stage_name = "prune samples"
+for(i in seq_along(physeq_list_0)){
+  if(names(physeq_list_0)[i] %in% names(physeq_list_1)){
+    name <- names(physeq_list_0)[i]
+    stage <- report_step_n(my_physeq = physeq_list_1[[name]], 
+                           my_physeq_o = physeq_list_0[[i]], 
+                           stage_name = stage_name) 
+  } else {
+    stage <- c(stage_name,
+              samples = NA_real_,
+              sequences = NA_real_,
+              taxa = NA_real_,
+              prop_samples = NA_real_,
+              prop_seq = NA_real_,
+              prop_taxa = NA_real_)
+  }
+  filtering_report[[i]] <- rbind(stage_0 = as.character(filtering_report_0[[i]]), stage_1 =stage)
+  names(filtering_report)[i] <- names(physeq_list_0)[i]
+}
+
+
+if(verbose_output) print(filtering_report)
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+```
+
+## Taxonomic filtering.  
+
+A number of taxonomic filtering operations is performed at this stage (depending on the nature of the object and filtering options, set in the setting_options chunk). Plots are optionally produced and saved.  
+
+```{r taxonomic_filtering, dpi = 96}
+if(keep_time) tic("taxonomic filtering, step 1")
+
+# check the nature of the taxonomic table
+# in FMBN you either have ASV tables or tax tables with agglomeration at the species level or above
+# which are the names of the tax levels?
+tax_levels <- c("domain","phylum","class","order","family","genus","species")
+# get/set rank names (this is necessary because phyloseq objects from FMBN or from the
+# bioconductor pipeline with SILVA have different names)
+
+physeq_list_2 <- lapply(physeq_list_1, gset_rank_names, tax_levels = tax_levels)
+# remove uncharacterized taxa in all phyloseq objects (using a functional)
+physeq_list_3 <- physeq_list_2
+if(rm_unchar){
+  physeq_list_3 <- lapply(physeq_list_2, subset_taxa, !is.na(domain) & !domain %in% c("", "uncharacterized"))
+  physeq_list_3 <- lapply(physeq_list_3, subset_taxa, !is.na(phylum) & !phylum %in% c("", "uncharacterized"))
+}
+
+# optionally remove Eukaryotes
+if(rm_euk) {
+  physeq_list_3 <- lapply(physeq_list_3, subset_taxa, domain !="Eukaryota")
+}
+
+# optionally remove chloroplasts and mitochondria 
+if(rm_chlmit) {
+  physeq_list_3 <- lapply(physeq_list_3, remove_Chl_Mit)
+}
+
+# use lookup table to change taxonomy of Lactobacillus; necessary for phyloseq objects produced with SILVA
+# but not for objects extracted from FMBN (which are transformed before extraction); will also change the 
+# taxa names for ASVs
+# MAY BE SLOW
+if(use_lookup){
+  # loop over the list of phyloseq objects
+  for(i in seq_along(physeq_list_3)){
+    # check the length of the names of the taxa; if <100 it is from FMBN, break
+    if(mean(sapply(taxa_names(physeq_list_3[[i]]), nchar),na.rm = T)<100){
+      next
+    } else {
+      # change the names
+      tnames <- str_c("ASV",seq(1:ntaxa(physeq_list_3[[i]])))
+      taxa_names(physeq_list_3[[i]])<-tnames
+      # get species to change
+      taxa_table <- as.data.frame(as(tax_table(physeq_list_3[[i]]),"matrix"))
+      taxa_table <- taxa_table %>% mutate(id = str_c(genus, species, sep = " "))
+      taxa_table <- left_join(taxa_table, lookup_table)
+      n_changes <- sum(!is.na(taxa_table$new_species))
+      taxa_table <- taxa_table %>% mutate(species = if_else(!is.na(new_species), new_species, species),
+                                          genus = if_else(!is.na(new_genus), new_genus, genus)
+      )
+      # remove columns
+      taxa_table <- dplyr::select(taxa_table, domain:species)
+      # now change genus for Lactobacillus with no species
+      to_change_lb <- which((taxa_table$genus == "Lactobacillus") & is.na(taxa_table$species))
+      taxa_table$genus[to_change_lb]<-"Lactobacillus complex"
+      # replace Leuconostocaceae with Lactobacillaceae
+      n_leuc <- nrow(dplyr::filter(taxa_table, family == "Leuconostocaceae"))
+      taxa_table <- taxa_table %>% mutate(family = ifelse(family == "Leuconostocaceae", "Lactobacillaceae", family))
+      taxa_table <- as.matrix(taxa_table)
+      rownames(taxa_table)<-tnames
+      tax_table(physeq_list_3[[i]])<-taxa_table
+      if(verbose_output){
+        cat(names(physeq_list_3)[i],": changed ", n_changes+n_leuc, " taxa\n", sep ="")
+      }
+    }
+  }
+}
+
+# remove further taxa which are uncharacterized at the family to class level
+
+# note for self: might improve it by setting the level at or above which uncharacterized taxa can be removed
+# rather than using a T/F flag
+if(above_genus_flag){
+  physeq_list_3 <- lapply(physeq_list_3, subset_taxa, !is.na(class) & !class %in% c("", "uncharacterized")) # Class
+  physeq_list_3 <- lapply(physeq_list_3, subset_taxa, !is.na(order) & !order %in% c("", "uncharacterized")) # Order
+  physeq_list_3 <- lapply(physeq_list_3, subset_taxa, !is.na(family) & !family %in% c("", "uncharacterized")) # Family
+}
+
+# optionally perform taxonomic agglomeration, 
+
+# may take some time; can be made faster with plyr functions using parallelization or with furrr
+physeq_list_4 <- physeq_list_3
+if(taxglom != "none"){
+  physeq_list_4 <- lapply(physeq_list_3, tax_glom_name_change, taxa_glom = taxglom)
+}
+
+# create third step of the filtering report
+stage_name = "taxonomic filter+glom"
+for(i in seq_along(physeq_list_0)){
+  if(names(physeq_list_0)[i] %in% names(physeq_list_1)){
+    name <- names(physeq_list_0)[i]
+    stage <- report_step_n(my_physeq = physeq_list_4[[name]], 
+                           my_physeq_o = physeq_list_0[[i]], 
+                           stage_name = stage_name) 
+  } else {
+    stage <- c(stage_name,
+              samples = NA_real_,
+              sequences = NA_real_,
+              taxa = NA_real_,
+              prop_samples = NA_real_,
+              prop_seq = NA_real_,
+              prop_taxa = NA_real_)
+  }
+  filtering_report[[i]] <- rbind(filtering_report[[i]], stage_3 =stage)
+}
+
+if(keep_time) toc()
+
+if(keep_time) tic("calculate diversity pre-filter")
+
+# Calculate diversity prior to filtering for prevalence and abundance
+
+div_est_prefilter <- map_dfr(physeq_list_4, phyloseq::estimate_richness, split = F, measure=c("Observed","Chao1","Shannon"))
+div_est_prefilter <- mutate(div_est_prefilter, Pielou_J = Shannon/log(Observed))
+# calculate and add ave Bray-Curtis dissimilarity
+meanbcdist <- map(physeq_list_4, phyloseq::distance, method="bray")
+div_est_prefilter$ave_BC <- unlist(map(meanbcdist, mean))
+
+row.names(div_est_prefilter) <- names(physeq_list_4)
+# save for further use
+save(div_est_prefilter, 
+     file = paste(file.path(output_folder,out_filename_pref), "_divprefilter.Rdata",sep=""))
+
+if(keep_time) toc()
+
+# Prevalence and abundance filter
+if(keep_time) tic("taxonomic filtering, step 2")
+
+# NOTE using a prevalence filter based on fraction may be wrong for studies with large 
+# number of samples, in which one might want to retain taxa which appear in >10 samples 
+
+physeq_list_5 <- physeq_list_4
+# will be skipped if filterOTUs == F
+node_stat_list <- vector("list", length = length(physeq_list_5))
+# a list which will host node stats, like the prevab data, initially empty,
+# if nothing is added at this stage, node stats will be added at a later stage
+if(filterOTUs){
+  prev_ab_list <- vector("list", length = length(physeq_list_4))
+  # will host the lists with the results
+  for(i in seq_along(physeq_list_4)){
+    if(verbose_output) cat("prevalence and abundance filter, physeq ",i," of ",
+                           length(physeq_list_4),"\n")
+    prev_ab_list[[i]] <- filter_by_prev_ab(
+      myphyseq = physeq_list_4[[i]],
+      name = names(physeq_list_4)[i]
+    )
+    names(prev_ab_list)[i]<-names(physeq_list_4)[i]
+    # save the processed phyloseq
+    physeq_list_5[[i]] <- prev_ab_list[[i]][[1]]
+    # save prev ab table
+    node_stat_list[[i]] <- prev_ab_list[[i]][[4]]
+    names(node_stat_list)[i] <- names(physeq_list_4)[i]
+  }
+}
+# optionally save the prev_ab_list
+if(save_prev_ab_list) save(prev_ab_list, 
+                           file = paste(file.path(output_folder,out_filename_pref), name, "_prevabl.Rdata",sep=""))
+
+# create fourth step of the filtering report
+stage_name = "prevalence and abundance"
+for(i in seq_along(physeq_list_0)){
+  if(names(physeq_list_0)[i] %in% names(physeq_list_1)){
+    name <- names(physeq_list_0)[i]
+    stage <- report_step_n(my_physeq = physeq_list_5[[name]], 
+                           my_physeq_o = physeq_list_0[[i]], 
+                           stage_name = stage_name) 
+  } else {
+    stage <- c(stage_name,
+              samples = NA_real_,
+              sequences = NA_real_,
+              taxa = NA_real_,
+              prop_samples = NA_real_,
+              prop_seq = NA_real_,
+              prop_taxa = NA_real_)
+  }
+  filtering_report[[i]] <- rbind(filtering_report[[i]], stage_4 =stage)
+}
+
+# remove unneeded objects
+rm(physeq_list_1, physeq_list_3, physeq_list_4, prev_ab_list, taxa_table)
+# create a data frame with the report
+filtering_report_df <- map_dfr(filtering_report, as.data.frame, .id = "dataset")
+filtering_report_df <- filtering_report_df %>% 
+  mutate(data_type = if_else(str_detect(dataset, "FMBN"), "FMBN", "ASV")) %>%
+  mutate(dplyr::across(.cols = samples:prop_taxa, as.numeric)) %>%
+  mutate(stage = as_factor(stage))
+if(verbose_output) {
+  print(filtering_report_df)
+  print(filtering_report_df %>%
+          dplyr::filter(stage != "original" & stage != "prune samples") %>%
+          ggplot(mapping = aes(x = data_type, y = prop_taxa)) +
+          facet_wrap(~stage) +
+          geom_boxplot() +
+          labs(x = "data type", y = "prop. taxa left"))
+  summ_filtering <- filtering_report_df %>%
+    group_by(data_type, stage) %>%
+    summarize(min_seq = min(prop_seq), 
+              max_seq = max(prop_seq),
+              min_taxa = min(prop_taxa),
+              max_taxa = max(prop_taxa))
+  print(summ_filtering)
+}
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+```
+
+The reduction in number of "taxa" is dramatic in most cases (from 0.010 to 0.21 left), while between 0.984 and 0.999 of the sequences are left.
+
+# Inferring the networks.
+
+I will now try Microbial Association Network inference, with the methods and parameters specified in the options chunk. Separate lists will be generated for each method.  
+An error trapping routine has been implemented: if MAN estimation fails a try-error object rather than an object of class microNet will be returned.  
+All the returned objects will be saved in a list (1 slot for each phyloseq object, each with 1 slot for each inference method).  
+
+```{r MAN_inference_1, dpi = 96}
+if(keep_time) tic("Microbial association network inference")
+if(verbose_output) cat("Please be patient, this will take a while...\n")
+# list for results, 1 slot for each object
+MAN_inf_results <- vector("list", length = length(physeq_list_5))
+# create list for methods, 1 slot for each method
+inf_meth_list <- vector("list", length = length(inf_methods))
+
+for(i in seq_along(physeq_list_5)){
+  name <- names(physeq_list_5)[i]
+  if(verbose_output) cat("\n", "Inferring network(s) for ", name, ", ", i, "of ", 
+                         length(physeq_list_5), "\n", sep=" ")
+  if(keep_time) {
+    ticmessage_object <- paste("microbial association network inference, ",
+                               name, ", ", i, " of ", length(physeq_list_5), sep = "")
+    tic(ticmessage_object)
+  }
+  for(j in seq_along(inf_methods)){
+    if(keep_time){
+      ticmessage_method <- paste("\n", "inference with method ",
+                                 inf_methods[j], ", ", j, " of ", length(inf_methods), sep = "")
+      tic(ticmessage_method)
+    }
+    infmethod <- inf_methods[[j]]
+    infparam <- inf_methods_param[[j]]
+   
+    # infrence is carried out here using a user defined function loaded with the `source()` command 
+    # you do not need to provide much detail, everything is taken care of in the options
+    # of course could be customized in the function call
+    inf_meth_list[[j]] <- infer_MAN(myphyseq = physeq_list_5[[i]],
+                                    inf_method = infmethod,
+                                    method_parameters = infparam)
+    names(inf_meth_list)[j] <- infmethod
+    if(keep_time) toc()
+  }
+  MAN_inf_results[[i]] <- inf_meth_list
+  names(MAN_inf_results)[i] <- name
+  if(keep_time) toc()
+}
+# create a report
+inference_report <- vector("list", length(MAN_inf_results))
+for(i in seq_along(MAN_inf_results)){
+  inference_report[[i]]<-map_dfr(MAN_inf_results[[i]], class, .id = "method")
+  names(inference_report)[i]<-names(MAN_inf_results)[i]
+}
+inference_report_df <- bind_rows(inference_report, .id = "dataset")
+
+# save the list and do some clean-up
+save(MAN_inf_results, file = file.path(output_folder, paste(out_filename_pref,"_MANlist.Rdata")))
+rm(inf_meth_list, inference_report)
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+```
+
+# Analyze the networks.  
+
+The inferred networks will be analyzed using NetCoMi::netAnalyze() and the resulting objects will be processed further.  
+Network, node and edge stats will be extracted to data frames/tibbles for further processing.  
+A few extra analyses will be carried out using package phyloseq to add diversity and evenness indices to the metadata.  
+
+```{r analyze_networks, dpi = 96}
+
+if(keep_time) tic("calculate diversity post-filter")
+
+# estimate diversity for each object of the physeq_list_5, returns a list with the results
+# extract and put together with metadata
+# will generate warnings
+
+div_est_postfilter <- map_dfr(physeq_list_5, estimate_richness, split = F, 
+                              measures = c("Observed","Chao1","Shannon"), .id = "label")
+div_est_postfilter <- mutate(div_est_postfilter, Pielou_J = Shannon/log(Observed))
+
+# calculate and add average Bray-Curtis dissimilarity
+meanbcdist <- map(physeq_list_5, phyloseq::distance, method="bray")
+div_est_postfilter$ave_BC <- unlist(map(meanbcdist, mean))
+
+row.names(div_est_postfilter) <- names(physeq_list_5)
+# save for further use
+save(div_est_postfilter, 
+     file = paste(file.path(output_folder,out_filename_pref), "_divpostfilter.Rdata",sep=""))
+
+# an alternative could be to use it on div_est_prefilter
+study_metadata <- left_join(study_metadata, div_est_postfilter)
+
+if(keep_time) toc()
+
+# calculate network statistics with netAnalyze
+if(keep_time) tic("Calculate network statistics")
+
+# the list for the methods within the dataset
+net_stats <- vector("list", length = length(MAN_inf_results))
+# net_stat_results is a list, do the calculation for each of the datasets, all inference methods
+for(i in seq_along(MAN_inf_results)){
+  name <- names(MAN_inf_results)[i]
+  if(verbose_output) cat("Calculating network stats for",name,"\n")
+  net_stat_results <- vector("list", length = length(MAN_inf_results[[i]]))
+  for(j in seq_along(MAN_inf_results[[i]])){
+    mthd <- names(MAN_inf_results[[i]])[j]
+    if(verbose_output) cat("method",mthd,"\n")
+    # consider reducing argument hubQuant to 0.75-0.90 default is 0.95),
+    net_stat_results[[j]] <- calculate_net_stats(MAN_inf_results[[i]][[j]])
+  }
+  names(net_stat_results)<-names(MAN_inf_results[[i]])
+  net_stats[[i]] <- net_stat_results
+  names(net_stats)[i]<-names(MAN_inf_results)[i]
+}
+rm(net_stat_results, meanbcdist, mthd)
+if(keep_time) toc()
+
+# extracting global network properties
+
+if(keep_time) tic("Extraction global network properties")
+# extracting the global network stats 
+global_props_list_a <-vector("list",length(net_stats))
+global_props_list_l <-vector("list",length(net_stats)) 
+global_props_list_all <-vector("list",length(inf_methods))
+global_props_list_lcc <-vector("list",length(inf_methods))
+for (i in seq_along(net_stats)){
+  dataset <- names(net_stats)[i]
+  for (j in seq_along(net_stats[[i]])){
+    if(class(net_stats[[i]][[j]])!= "microNetProps"){
+      next
+    } else{
+      nnodes <- sum(net_stats[[i]][[j]]$centralities$degree1>0)
+      ntaxa <- nrow(net_stats[[i]][[j]]$input$assoMat1)
+      nposedge <- sum(net_stats[[i]][[j]]$input$assoMat1[lower.tri(net_stats[[i]][[j]]$input$assoMat1)]>0)
+      nnegedge <- sum(net_stats[[i]][[j]]$input$assoMat1[lower.tri(net_stats[[i]][[j]]$input$assoMat1)]<0)
+      extra_prop_vector <- c(nnodes, ntaxa, nposedge, nnegedge)
+      names(extra_prop_vector) <- c("nnodes", "ntaxa", "nposedge", "nnegedge")
+      global_props_list_all[[j]] <- c(unlist(net_stats[[i]][[j]]$globalProps),extra_prop_vector)
+      global_props_list_lcc[[j]] <- c(unlist(net_stats[[i]][[j]]$globalPropsLCC),extra_prop_vector)
+      names(global_props_list_all)[j] <- names(global_props_list_lcc)[j]<- names(net_stats[[i]][j])
+    }
+    # create data frame with results
+    all_df <- bind_rows(global_props_list_all, .id = "method")
+    lcc_df <- bind_rows(global_props_list_lcc, .id = "method") 
+  }
+  global_props_list_a[[i]] <- all_df
+  global_props_list_l[[i]] <- lcc_df
+  names(global_props_list_a)[i] <- names(global_props_list_l)[i] <- names(net_stats)[i]
+}
+# note that str_sub only works if you have <=9 inference methods in inf_methods
+global_all_df <- bind_rows(global_props_list_a, .id = "dataset") 
+global_lcc_df <- bind_rows(global_props_list_l, .id = "dataset") 
+
+
+global_all_df <- left_join(global_all_df, 
+                           select(study_metadata,label, obj_type, target, 
+                                  region, platform, samples, type, Observed, 
+                                  Chao1, Shannon, Pielou_J, ave_BC), 
+                           by = c("dataset" = "label")) %>%
+  mutate(across(where(is.numeric), ~na_if(.,Inf)))
+global_lcc_df <- left_join(global_lcc_df, 
+                           select(study_metadata,label, obj_type, target, 
+                                  region, platform, samples, type, Observed, 
+                                  Chao1, Shannon, Pielou_J, ave_BC), 
+                           by = c("dataset" = "label")) %>%
+  mutate(across(where(is.numeric), ~na_if(.,Inf)))
+
+# both might contain Inf which are replaced by NA (using dplyr::na_if()) to be handled
+# correctly if doing PCA by pairwise deletion.
+# the problem only occurs in avPath1 and clustCoef1, but I am handling it with a scoped mutate
+# a better solution might be the use of hablar::rationalize()
+
+
+# save the data frames for further use
+write_tsv(global_all_df, file = paste(file.path(output_folder,out_filename_pref), "_netpropall.txt",sep=""))
+write_tsv(global_lcc_df, file = paste(file.path(output_folder,out_filename_pref), "_netproplcc.txt",sep=""))
+
+# print a summary table
+global_all_df
+
+rm(global_props_list_a, global_props_list_l, global_props_list_all, 
+   global_props_list_lcc, all_df, lcc_df, nnodes, ntaxa, nposedge, nnegedge, extra_prop_vector)
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+```
+
+Global network properties have been saved as data frames for further use. They will be used together those generated for the other data sets.
+
+## Node properties.
+
+Node properties can be extracted from the microNetProps objects and saved for further use.  
+
+```{r extract_nodes, dpi = 96}
+
+# extract node properties
+# using a loop takes slightly longer that using functionals but handles names better
+# note that when using ASVs comparing nodes between datasets does not make much sense
+
+if(keep_time) tic("Extracting node properties")
+
+node_stats <- vector("list", length = length(net_stats))
+for (i in seq_along(net_stats)) {
+  node_properties <- node_stat_list[[i]]
+  
+  if(verbose_output) cat("extracting node stats for", names(net_stats)[i],"\n")
+  for (j in seq_along(net_stats[[i]])) {
+    if (class(net_stats[[i]][[j]]) == "microNetProps") {
+      node_stats[[i]][[j]] <- extract_node_stats(net_stat_list = net_stats[[i]][[j]], 
+                                                 nodestat = node_properties)
+      method <- names(net_stats[[i]])[j]
+      dataset <- names(net_stats)[i]
+      nrows <- nrow(node_stats[[i]][[j]])
+      node_stats[[i]][[j]] <- bind_cols(
+        dataset = rep(dataset,nrows),
+        method = rep(method,nrows),
+        node_stats[[i]][[j]]
+        )
+    } else {
+      cat("no node stats to return for",
+          names(net_stats)[i],
+          names(node_stats[[i]])[j],
+          "\n")
+      next
+    }
+  }
+  node_stats[[i]]<-bind_rows(node_stats[[i]])
+}
+node_stats_df <- bind_rows(node_stats)
+# perform some tidying
+node_stats_df <- node_stats_df %>%
+  tidyr::separate(dataset, into = c("Study", "Accn_n", "suf"), sep = "_", remove = F) %>% 
+  dplyr::select(-Accn_n, -suf) %>%
+  mutate(label2 = if_else(!str_detect(dataset, "FMBN"),str_c(label, Study, sep = "_"), label))
+
+# label2 is only necessary when using ASVs or OTUs, not if there has been taxonomic agglomeration
+# consider removing the mutate instruction
+
+write_tsv(node_stats_df, file = paste(file.path(output_folder,out_filename_pref), "_nodestats_df.txt",sep=""))
+rm(node_stats)
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+
+```
+
+## Edge properties.  
+
+Edges and edge properties can also be extracted for further use. Important edge properties are:
+
+* edge type (positive or negative)  
+
+* edge weight and association measure
+
+* edge betweenness  
+
+It is also convenient to compare edges among different graphs (and to do so it might be convenient to make sure that "to" and "from" are always in alphabetical order, which is always true within the same graph but might not be necessarily true among different graphs).  
+The following chunk will (optionally): 
+
+* integrate node (calculated with `netAnalyse()`) in the tidygraph list, 
+
+* calculate edge betweenness,  
+
+* compare networks (within dataset) by producing and saving Venn diagrams of the edges
+
+Finally, a data frame with all edges will be produced for further use.  
+
+
+```{r further_edge_node_properties, dpi = 96}
+
+if(keep_time) tic("List with tidygraph objects created")
+
+# creating a tidygraph object for each net
+tidygraph_list <- vector("list", length = length(MAN_inf_results))
+
+for(i in seq_along(MAN_inf_results)){
+  if(verbose_output) cat("Converting in tidygraphs for", names(MAN_inf_results)[i],"\n")
+  # the warning, if any, is not very informative, should consider passing names of datasets and methods
+  tidygraph_list[[i]] <- MAN_inf_results[[i]] %>% map(microNet_to_tidygraph, fail_w_err = F, use_asso_matrix = T)
+}
+names(tidygraph_list)<-names(MAN_inf_results)
+if(keep_time) toc()
+
+# optionally merge further node stats (depends on merge_n_stats) 
+# and calculate edge betweenness (depends on calc_e_betw)
+# I am using a loop
+if(keep_time) tic("Stats added to tidygraphs, edge dataframe created")
+tidygraph_list_wstats <- vector("list", length = length(tidygraph_list))
+# the list with the edge data frames
+edge_list <- vector("list", length = length(tidygraph_list))
+
+for(i in seq_along(tidygraph_list_wstats)){
+  # need to be reset
+  inner_tgl <- vector("list", length = length(tidygraph_list[[i]]))
+  inner_el <- vector("list", length = length(tidygraph_list[[i]]))
+  dtst <- names(tidygraph_list)[i]
+  for(j in seq_along(inner_tgl)){
+    if(is.tbl_graph(tidygraph_list[[i]][[j]])){
+    mthd = names(tidygraph_list[[i]])[j]
+    nstats <- node_stats_df %>% dplyr::filter(dataset == dtst & method == mthd)
+    inner_tgl[[j]] <- merge_stats(tg = tidygraph_list[[i]][[j]],
+                             node_stats = nstats, 
+                             ebetw = calc_e_betw)
+     # extract edge tibble
+    inner_el[[j]] <- inner_tgl[[j]] %>% 
+      activate(edges) %>% 
+      as_tibble() %>%
+      mutate(method = mthd)
+    # do naming
+    names(inner_tgl)[j] <- names(inner_el)[j] <- names(tidygraph_list[[i]])[j]
+    } else {
+      next
+    }
+  }
+  tidygraph_list_wstats[[i]] <- inner_tgl
+  edge_list[[i]] <- bind_rows(inner_el)
+  edge_list[[i]] <- edge_list[[i]] %>% 
+    mutate(dataset = dtst) %>% dplyr::select(dataset, method, !(dataset:method))
+  names(tidygraph_list_wstats)[i] <- names(edge_list)[i] <- names(tidygraph_list)[i]
+}
+rm(nstats)
+# build and fix the edge df
+edge_list_df <- bind_rows(edge_list)
+
+edge_list_df <- edge_list_df %>% 
+  mutate(name_from_sorted = if_else(from_name < to_name, from_name, to_name),
+         name_to_sorted = if_else(from_name < to_name, to_name, from_name)) %>%
+  mutate(edge_name = str_c(name_from_sorted, name_to_sorted, sep = "--"))
+write_tsv(edge_list_df, file = paste(file.path(output_folder,out_filename_pref), "_edgelist_df.txt",sep=""))
+if(keep_time) toc()
+
+# make Venn plots
+
+# I am using a loop
+if(do_Venn){
+  if(keep_time) tic("Venn plots created and saved")
+  Venn_list <- vector("list", length(tidygraph_list))
+  for(i in seq_along(tidygraph_list)){
+    # need to select only elements of class tbl_graph
+    tblgrphs <- map_lgl(tidygraph_list[[i]], is.tbl_graph)
+    names(Venn_list) <- names(tidygraph_list)
+    if(length(tidygraph_list[[i]][tblgrphs])>1){
+      inner_list <- map(tidygraph_list[[i]][tblgrphs], function(x) as_ids(E(x)))
+      Venn_title <- names(tidygraph_list)[i]
+      Venn_file <- paste(file.path(output_folder,out_filename_pref),"_",Venn_title, "_venns.tiff",sep="")
+      my_fill <- (2:5)[1:length(tidygraph_list[[i]][tblgrphs])]
+      Venn_list[[i]] <- venn.diagram(inner_list, 
+                                       fill = my_fill, 
+                                       alpha = 0.3, 
+                                       filename = Venn_file, 
+                                       margin = 0.05, 
+                                       main = Venn_title, 
+                                       main.cex = 1.5, 
+                                       main.fontface = "bold", 
+                                       main.fontfamily = "sans", 
+                                       main.pos = c(0.5, 1.05)
+        )
+    }
+  }
+  rm(inner_list, Venn_title, Venn_file)
+  if(keep_time) toc()
+}
+
+if(play_audio) beep(sound = 6)
+```
+Looking at the Venns it can be seen that the sparsest networks are almost always produced by SPIEC-EASI and that the number of edges shared by all methods for any given is very low. 
+
+# Comparing global properties.
+
+Comparing global network properties may be of assistance in evaluating the effect of the inference method or of the type of study. Although NetCoMi offers very effective tools to compare two networks, it does not easily generalize to more than 2-3 networks. Here, I will use the global_all_df and global_lcc_df and produce graphs using PCA.  
+__Note__ line 1051 should be manually adapted to show all loadings and scores
+
+```{r compare_global, dpi = 96}
+if(keep_time) tic("Comparing global properties")
+# create a label and extract matrix for the analysis
+global_all_df_2 <- global_all_df %>%
+  tidyr::separate(dataset, into = c("study", "type", "object"), remove = F) %>%
+  select(-type, -object) %>%
+  mutate(method_brief = case_when(
+    method == "spieceasi" ~ "spi",
+    method == "spring" ~ "spr",
+    method == "ccrepe" ~ "ccr",
+    method == "sparcc" ~ "spa"
+  )) %>%
+  tidyr::unite(label, study, method_brief, sep = "_", remove = F)
+
+
+# keep only relevant columns and make a matrix
+global_all_df_mat <- global_all_df_2 %>% 
+  dplyr::select(label, nComp1:nnegedge, samples, Chao1, Pielou_J, ave_BC) %>%
+  column_to_rownames("label") %>% as.matrix()
+
+# optionally obtain a scatterplot matrix
+if(verbose_output) ggpairs(as.data.frame(global_all_df_mat), progress = F)
+
+
+# look at the number of components (using correlation matrix)
+var_to_use <- !(colnames(global_all_df_mat) %in% c("ncomp", "vertConnect1","edgeConnect1","ntaxa"))
+psych::fa.parallel(global_all_df_mat[,c(1:5,8:14,17:18)], fa = "pc", n.iter = 100)
+
+
+PCA1 <- psych::principal(global_all_df_mat[,c(1:5,8:14,17:18)], nfactors = 2, rotate = "varimax")
+PCA1
+biplot(PCA1, xlim.s = c(-1,4), ylim.s = c(-2,5), main = "PCA biplot, all variables")
+fullnetscores <- cbind(global_all_df_2,PCA1$scores)
+# the score plot
+ggplot(fullnetscores, mapping = aes(x = RC1, y = RC2, shape = method, colour = study)) +
+  geom_point() +
+  labs(title = "all variables") +
+  scale_shape_manual(values = c("spieceasi" = 16, "spring" = 17, "ccrepe" = 15, "sparcc" = 18)) +
+  scale_color_brewer(type = "qual", palette = "Paired") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+var_to_use <- colnames(global_all_df_mat) %in% c("ncomp1", "modularity1","density1","clustCoef1",
+                                                 "avPath1", "pep1", "Pielou_J", "ave_BC", "nnodes")
+cat("variables to use: ", var_to_use, "\n")
+
+psych::fa.parallel(global_all_df_mat[,var_to_use], fa = "pc", n.iter = 100)
+
+PCA2 <- principal(global_all_df_mat[,var_to_use], nfactors = 2, rotate = "varimax")
+PCA2
+biplot(PCA2)
+fullnetscores_2 <- cbind(global_all_df_2,PCA2$scores)
+var_acc_RC1 <- round(PCA2$Vaccounted[4,1],3)
+var_acc_RC2 <- round(PCA2$Vaccounted[4,2],3)
+# the score plot
+ggplot(fullnetscores_2, mapping = aes(x = RC1, y = RC2, shape = method, colour = study)) +
+  geom_point() +
+  labs(title = "selected variables") +
+  scale_shape_manual(values = c("spieceasi" = 16, "spring" = 17, "ccrepe" = 15, "sparcc" = 18)) +
+  scale_color_brewer(type = "qual", palette = "Paired") +
+  labs(x = paste("RC1 (", var_acc_RC1, ")", sep =""),
+       x = paste("RC2 (", var_acc_RC2, ")", sep ="")) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+ggsave(filename = paste(file.path(output_folder,out_filename_pref), "_PCA.tiff",sep=""), device = "tiff", width = 6, 
+       height = 5, units = "in", dpi=600)
+
+if(keep_time) toc()
+```
+
+With these many datasets and inference methods the PCA becomes difficult to use. Note how the properties of the network are, as expected, specific to any given inference methods and data-set and how methods based on correlation (sparCC and CCREPE) tend to be closer among them than to methods based on conditional dependence. 
+
+The analysis is repeated below on the largest connected component for each network.  
+
+```{r compare_global_LCC, dpi = 96}
+if(keep_time) tic("Comparing global properties on LCC")
+# create a label and extract matrix for the analysis
+global_all_df_3 <- global_lcc_df %>%
+  tidyr::separate(dataset, into = c("study", "type", "object"), remove = F) %>%
+  select(-type, -object) %>%
+  mutate(method_brief = case_when(
+    method == "spieceasi" ~ "spi",
+    method == "spring" ~ "spr",
+    method == "ccrepe" ~ "ccr",
+    method == "sparcc" ~ "spa"
+  )) %>%
+  tidyr::unite(label, study, obj_type, method_brief, sep = "_", remove = F)
+
+
+# keep only relevant columns and make matrix
+global_all_df_mat_2 <- global_all_df_3 %>% 
+  dplyr::select(label, lccSize1:nnegedge, samples, Chao1, Pielou_J, ave_BC) %>%
+  column_to_rownames("label") %>% as.matrix()
+# need to remove an Inf value, I am removing the row
+
+# obtain a scatterplot matrix
+if(verbose_output) ggpairs(as.data.frame(global_all_df_mat_2[-3,]), progress = F)
+
+
+# look at the number of components (using correlation matrix): must exclude
+# ave path length and clustering coefficient which contain Inf and NaN
+
+psych::fa.parallel(global_all_df_mat_2[-3,c(1:3,6,9:14,17:18)], fa = "pc", n.iter = 100)
+
+
+PCA1_lcc <- psych::principal(global_all_df_mat_2[-3,c(1:3,6,9:14,17:18)], nfactors = 2, rotate = "varimax")
+PCA1_lcc
+biplot(PCA1_lcc, main = "PCA biplot, all variables")
+fullnetscores_lcc <- cbind(global_all_df_3[-3,],PCA1_lcc$scores)
+# the score plot
+ggplot(fullnetscores_lcc, mapping = aes(x = RC1, y = RC2, shape = method, colour = study)) +
+  geom_point() +
+  labs(title = "all variables") +
+  scale_shape_manual(values = c("spieceasi" = 16, "spring" = 17, "ccrepe" = 15, "sparcc" = 18)) +
+  scale_color_brewer(type = "qual", palette = "Paired") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+var_to_use_lcc <- colnames(global_all_df_mat) %in% c("lccSize1", "modularity1","density1", "pep1", "Pielou_J", "ave_BC", "nnodes")
+cat("variables to use: ", var_to_use_lcc, "\n")
+
+psych::fa.parallel(global_all_df_mat_2[-3,var_to_use_lcc], fa = "pc", n.iter = 100)
+
+PCA2_lcc <- principal(global_all_df_mat_2[-3,var_to_use_lcc], nfactors = 2, rotate = "varimax")
+PCA2_lcc
+biplot(PCA2_lcc)
+fullnetscores_2_lcc <- cbind(global_all_df_2[-3,],PCA2_lcc$scores)
+# the score plot
+var_acc_RC1_lcc <- round(PCA2$Vaccounted[4,1],3)
+var_acc_RC2_lcc <- round(PCA2$Vaccounted[4,2],3)
+# the score plot
+ggplot(fullnetscores_2_lcc, mapping = aes(x = RC1, y = RC2, shape = method, colour = study)) +
+  geom_point() +
+  labs(title = "selected variables") +
+  scale_shape_manual(values = c("spieceasi" = 16, "spring" = 17, "ccrepe" = 15, "sparcc" = 18)) +
+  scale_color_brewer(type = "qual", palette = "Paired") +
+  labs(x = paste("RC1 (", var_acc_RC1_lcc, ")", sep =""),
+       x = paste("RC2 (", var_acc_RC2_lcc, ")", sep ="")) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave(filename = paste(file.path(output_folder,out_filename_pref), "_PCA_lcc.tiff",sep=""), device = "tiff", width = 6, 
+       height = 5, units = "in", dpi=600)
+
+if(keep_time) toc()
+```
+
+The results are similar, and there is not much to add. While SPIEC-EASI produces the most sparse networks (and can be a candidate for the detection of the most parsimonious interaction sets), CCREPE and SparCC both may detect indirect interactions and, detecting clusters in this networks may be useful to detect sub-biomes within a given study.
+
+ 
+# Plotting selected networks.  
+
+I will now use tidygraph and ggraph to plot the networks. The thickness of the edges is made proportional to the absolute value of the association measure. Copresence edges are in green, mutual exclusion ones in red. Size of the nodes is made proportional to the total degree (negative degree + positive degree). The color of the nodes is determined by the phylum. Some of this options can be adjusted in the call to the plot_ggraph() function below. Others must be adjusted in the code of the function (all functions are in the source folder).  
+
+```{r plotting_networks, dpi = 96}
+if(keep_time) tic("Plotting the networks with ggraph")
+# create a list of network plots
+netplot_list <- vector("list", length = length(tidygraph_list_wstats))
+for(i in seq_along(tidygraph_list_wstats)){
+  netplot_list_2 <- vector("list", length = length(tidygraph_list_wstats[[i]]))
+  dtst <- names(tidygraph_list_wstats)[i]
+  for(j in seq_along(tidygraph_list_wstats[[i]])){
+    if(!is.tbl_graph(tidygraph_list_wstats[[i]][[j]])){
+      netplot_list_2[[j]] <- "no plot to return"
+      next
+    } else {
+      tg <- tidygraph_list_wstats[[i]][[j]]
+      mthd <- names(tidygraph_list_wstats[[i]])[j]
+      # the default for the argument c0l0r is phylum, otherwise
+      # use c0l0r = clust_memb
+      # argument lp = "bottom" is the default; "right" is an alternative
+      netplot_list_2[[j]] <- plot_ggraph(tidy_graph = tg,
+                                         method = mthd,
+                                         name = dtst,
+                                         lp = "right")
+      names(netplot_list_2)[j] <- mthd
+      print(netplot_list_2[[j]])
+    }
+  }
+  netplot_list[[i]] <- netplot_list_2
+  names(netplot_list)[i] <- dtst
+}
+
+rm(tg, dtst, mthd, netplot_list_2)
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+```
+
+Due to the large number of interactions it is hard to discuss the results. In some of the graphs clusters are clearly evident (and could be highlighted by using the cluster id for colors). The structure of the graphs obtained with the different methods for each given dataset is also different. This may be due to the fact that both the correlation based methods may detect indirect interactions.  
+In addition, given the scope of this analysis (with emphasis on nodes and edges conserved across different studies) there is little point in discussing individual networks, because this would require going into detail in the experimental approach used in each study.  
+The following chunk id design to compare network plots build with different methods in a grid. Two of the datasets (chosen because they returned a network for all inference methods and because they had networks of different complexity have been chosen here). However, due to the large number of elements in the graph, plotting all the elements (graph, legend, title) is difficult and may require acting on graphic parameters.  
+
+```{r compare_network_plots, dpi = 96, eval = F}
+if(keep_time) tic("Plotting and saving networks in a grid")
+
+p1<-netplot_list[[2]][[1]]
+p2<-netplot_list[[2]][[2]]
+p3<-netplot_list[[2]][[3]]
+p4<-netplot_list[[2]][[4]]
+ggrid_1 <- egg::ggarrange(p1, p2, p3, p4, nrow = 2, ncol = 2)
+fn <- paste(file.path(output_folder,out_filename_pref), "_ST110.tiff",sep="")
+ggsave(ggrid_1, filename = fn, dpi = 600, width = 7, height = 7)
+ggrid_1
+
+p5<-netplot_list[[9]][[1]]
+p6<-netplot_list[[9]][[2]]
+p7<-netplot_list[[9]][[3]]
+p8<-netplot_list[[9]][[4]]
+ggrid_2 <- egg::ggarrange(p5, p6, p7, p8, nrow = 2, ncol = 2)
+fn <- paste(file.path(output_folder,out_filename_pref), "_ST136.tiff",sep="")
+ggsave(ggrid_2, filename = fn, dpi = 600, width = 7, height = 7)
+ggrid_2
+
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+rm(p1, p2, p3, p4, p5, p6, p7, p8)
+```
+
+
+# Node analysis.
+
+When comparing networks from several studies it might be of interest to classify nodes on the basis of their measures of centrality across multiple studies: is there a super hub (i.e. a node which i a hub in several networks)? How are different centrality measures related? Are there nodes which engage more often in negative interactions? Of course it would be pointless to compare across several methods of inference or, given the results above, between ASV and FMBN studies (when aggregation at the genus level is used).
+This script will produce a few node plotsas a proof of concept. Both SPIEC-EASI and SparCC will be used on data extracted from FMBN and aggregated at the genus level.
+
+
+
+```{r node_analysis_hub_freq, dpi = 96}
+if(keep_time) tic("Node analysis")
+
+mymethods <- c("spieceasi","sparcc")
+n_to_label <- 20 # max number of nodes to label in the node plots
+node_analysis_list <- vector("list", length = length(mymethods))
+for(i in seq_along(mymethods)){
+  # create the dfs, one for spiec-easi and one for sparCC and only select FMBN
+  # only select nodes with degree>0
+  FMBN_node_df <- node_stats_df %>%
+    dplyr::filter(method == mymethods[i]) %>%
+    dplyr::filter(degree>0) %>%
+    mutate(Study = as.factor(Study),
+           rel_pos_degree = pos_degree / sum(pos_degree)) %>%
+    dplyr::rename(tlabel = label)
+  
+  
+  # use a loop to do the node degree graphs, print them and put them in a list
+  node_degree_plot_list <- vector("list", length=nlevels(FMBN_node_df$study))
+  
+  for(j in seq_along(levels(FMBN_node_df$Study))){
+    gtitle = paste(levels(FMBN_node_df$Study)[j], mymethods[i], sep = ", ")
+    temp_df <- FMBN_node_df %>% 
+      dplyr::filter(Study ==levels(FMBN_node_df$Study)[j]) %>%
+      mutate(dgr = pos_degree + neg_degree) %>%
+      arrange(-dgr) %>%
+      rowid_to_column() %>% 
+      mutate(to_label = if_else((rowid<=20 | is_hub), tlabel, NA_character_))
+    
+    ave_degree = mean(temp_df$dgr, na.rm = T)
+    ave_pos_degree = mean(temp_df$pos_degree, na.rm = T)
+    # creating the plot, only the names of the top 20 nodes (in terms of degree)
+    # are plotted, hubs are always plotted
+    ggp <- ggplot(
+      temp_df,
+      mapping = aes(
+        x = pos_degree,
+        y = dgr,
+        label = str_trunc(genus, 12, side = "center")
+      )
+    ) +
+      geom_smooth(method = "lm", linetype = 3, se = F, color = I("black"), show.legend = F) +
+      geom_point(mapping = aes(color = phylum,
+                               size = relAbundance,
+                               alpha = between)) +
+      geom_text_repel(show.legend = F, max.overlaps = 20, alpha = I(0.5)) +
+      geom_abline(slope = 1, intercept = 0, linetype = 1) +
+      geom_hline(yintercept = ave_degree, linetype = 3, show.legend = F) +
+      geom_vline(xintercept = ave_pos_degree, linetype = 3, show.legend = F) +
+      scale_alpha_continuous(range = c(0.4, 1)) +
+      scale_size_continuous(range = c(1,6)) +
+      labs(
+        x = "positive degree",
+        y = "degree",
+        size = "relative abundance",
+        alpha = "betweenness",
+        title = gtitle
+      ) +
+      theme_bw() +
+      theme(plot.title = element_text(hjust = 0.5))
+    
+    print(ggp)
+    node_degree_plot_list[[j]] <- ggp
+    names(node_degree_plot_list[[j]]) <- gtitle
+  }
+  file_name <- paste(file.path(output_folder,out_filename_pref), "_", mymethods[i], "_nodeplots.Rdata",sep="")
+  save(node_degree_plot_list, file = file_name)
+  
+  # calculate frequency for hubs (meaningful only if you have many taxa and the percentile for hub detection is low, say 0.75-0.90)
+  n_datasets <- dplyr::n_distinct(FMBN_node_df$dataset)
+  FMBN_node_df_hubs <- FMBN_node_df %>%
+    dplyr::filter(is_hub == T) %>%
+    group_by(tlabel, phylum, class) %>%
+    summarise(hub_freq = n()/n_datasets) %>%
+    arrange(-hub_freq)
+  cat("method", mymethods[i], "hub frequency", "\n")
+  head(FMBN_node_df_hubs, 20)
+  # save elements in the list
+node_analysis_list[[i]] <- list(
+  node_df = FMBN_node_df,
+  plot_list = node_degree_plot_list,
+  node_df_hubs = FMBN_node_df_hubs
+)
+names(node_analysis_list)[i]<- mymethods[i]
+  
+}
+
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+rm(FMBN_node_df, node_degree_plot_list, temp_df, FMBN_node_df_hubs)
+```
+
+The node plots provide a number of visual cues:
+
+* the horizontal and vertical dotted lines show the average value for degree and positive degree and may help in identifying nodes whose values are far from the mean;  
+
+* the diagonal continuous line corresponds to points for which positive degree and degree are equal; points above the line have at least 1 negative interaction
+
+* the diagonal dotted line is the linear regression line for degree as a function of positive degree; its position and slope relative to the previous line indicates on average how much the ratio between total degree and positive degree changes as a function of degree; data points which are far from this line also have an unusual ratio between the two values compared to the other nodes in the same dataset.  
+
+* negative hubs will be located close to the upper left corner; positive hubs will be closer to the right of the plot.  
+
+Even with SPIEC-EASI the number of plotted nodes is high for some studies (but very low for others), and one my consider plotting a given number of nodes (the ones with top degree? top eigenvector centrality?, some combination of both) to simplify the plot.  
+Said that, although beetweenness centrality may be interesting to identify "bottleneck" taxa, looking at betweenness is difficult (the shades of alpha = transparency are visually difficult to separate), but otherwise degree, positive degree and abundance are all easy to visualise.  
+
+# Edge analysis.  
+
+Edge analysis only makes sense once one has settled for meaningful questions and selected a large and diverse enough set of studies.
+Questions which might be relevant:
+
+* how stable is an edge?
+
+  + within a study across methods
+  
+  + across studies with a given method
+  
+* given an inference method, can one assemble a consensus network using as weights the number of times a given edge occurs? The frequency of occurrence?
+
+* how important is an edge (as measured by edge betweenness)? One must choose a meaningful context for this
+
+* are co-occurrence relationships more frequent among members of the same class or family (and the reverse for mutual exclusion)? This only makes sense within a given method and must be corrected by the frequency of ech given larger taxon.
+
+* given a (possibly important) microorganism, with which microorganisms is it most frequently associated with positive or negative associations? This only makes sense within a given method and once one has analyzed a large number of studies
+
+* for moderately large networks, which is the cumulative distribution of edge betweenness? Does this hold any importance in terms of structure of the networks?
+
+```{r edge_analysis_betweeness, dpi = 96}
+if(keep_time) tic("Edge analysis")
+# this calculates the empirical quantile of edge betweenness
+# by dataset and method: I suppose one can then select those >0.95
+# to get a sort of hubness for edges, but it makes sense only for 
+# large number of edges
+edge_list_df <- edge_list_df %>% group_by(dataset, method) %>%
+  mutate(ebq = ecdf(edge_betw)(edge_betw)) %>% ungroup()
+
+# calculate the frequency of edges, by study and type and 
+# median value and IQR for IQR
+# this only checks for conserved edges across methods
+edge_freq_bystudy <- edge_list_df %>% 
+  group_by(dataset, asso_type, edge_name) %>% 
+  summarise(n = n(),
+            med_ebq = median(ebq),
+            iqr_ebq = IQR(ebq)) %>%
+  arrange(-n, -med_ebq, ) %>% 
+  ungroup()
+
+# I am now generating a plot may be with the top 50 edges, only for FMBN studies
+edge_freq_bystudy_FMBN <- edge_freq_bystudy %>%
+  dplyr::filter(str_detect(dataset, "FMBN")) %>%
+  arrange(-n, -med_ebq)
+
+# let's try a plot (gives an emphasis to most stable edges)
+slice_to_plot <- slice(edge_freq_bystudy_FMBN, 1:50) %>%
+    mutate(edge_name = forcats::fct_reorder(edge_name, med_ebq)) 
+
+ggplot(slice_to_plot, 
+       mapping = aes(x = edge_name, y = med_ebq, size = n, color = asso_type)) +
+  geom_point() + 
+  coord_flip() +
+  labs(x = "edge", y = "edge betweenness quantile",
+      size = "edge freq.") +
+    scale_colour_manual(values = c("green","red"))
+```
+Many of the most stable edges include gut bacteria and probably represent cluster of interactions from this environment which are carried over to milk and then, possibly, cheese (some studies analyzed here include also environmental samples, like feces).  
+The analysis here was carried out by groping by dataset and association type, therefore the frequency is by dataset and a frequency of 4 indicates that a given edge was detected by all 4 methods in a single dataset. The code can be easily modified to detect edges which are conserved across different studies and different methods.
+I will now try to estimate the taxonomic assortativity. To do this, the odds ratio (OR) for copresence links (given that the nodes belong to the same family) and mutual exlusion links (given that the nodes belong to different families) is calculated and the significance is evaluated using `epi.2by2()` function.  
+
+
+```{r edge_analysis_assortativity, dpi = 96}
+# same, by method and assotype, only for FMBN
+# only meaningful for high number of studies
+edge_freq_bymethod <- edge_list_df %>% 
+  dplyr::filter(str_detect(dataset, "FMBN")) %>%
+  group_by(method, asso_type) %>% 
+  count(edge_name) %>%
+  arrange(method, asso_type, -n)
+
+# The following section evaluates taxonomic assortativity (i.e. evaluates if 
+# copresence associations are more frequent among members of the same 
+# family, order or class). The odds ratio of copresence relationships within
+# the same family is calculated using epiR::epi.2by2()
+
+# first, add taxonomy to the 
+unique_tax <- node_stats_df %>% 
+  dplyr::select(label, domain:species) %>%
+  distinct()
+
+edge_list_df_wtaxa <- edge_list_df
+edge_list_df_wtaxa <- left_join(edge_list_df_wtaxa, 
+                                dplyr::select(unique_tax, label, class, order, family), 
+                                by = c("from_name" = "label")) %>%
+  dplyr::rename(from_class = class, from_order = order, from_family = family)
+edge_list_df_wtaxa <- left_join(edge_list_df_wtaxa, 
+                                dplyr::select(unique_tax, label, class, order, family), 
+                                by = c("to_name" = "label")) %>%
+  dplyr::rename(to_class = class, to_order = order, to_family = family)
+# check if same family or same class
+edge_list_df_wtaxa <- edge_list_df_wtaxa %>%
+  mutate(same_class = if_else(from_class == to_class, T, F),
+         same_order = if_else(from_order == to_order, T, F),
+         same_family = if_else(from_family == to_family, T, F)
+         )
+
+# use a loop to calculate odds ratios and probabilities
+# get the number of studies
+
+edge_list_df_wtaxa <- edge_list_df_wtaxa %>% 
+  separate(dataset, into = c("study", "col2", "col3"), remove = F) %>%
+  select(-col2, -col3) %>%
+  mutate(study = as.factor(study),
+         sf = factor(same_family, levels = c("TRUE", "FALSE")),
+         so = factor(same_order, levels = c("TRUE", "FALSE")),
+         sc = factor(same_class, levels = c("TRUE", "FALSE"))
+  )
+
+assort_results_list <- vector(mode = "list", length = nlevels(edge_list_df_wtaxa$study))
+taxo_level_selection <- "family"
+for(i in seq_along(levels(edge_list_df_wtaxa$study))){
+  input_df_study <- edge_list_df_wtaxa %>% dplyr::filter(study == levels(study)[i]) %>%
+    mutate(method = as.factor(method))
+  inner_result_list <- vector(mode = "list", length = nlevels(input_df_study$method))
+  for(j in seq_along(levels(input_df_study$method))){
+    input_df_method <- input_df_study %>% 
+      mutate(method = as.factor(method)) %>%
+      dplyr::filter(method == levels(method)[j])
+    inner_result_list[[j]]<-try(odds_ratio(input_df_method, taxo_level = taxo_level_selection))
+    names(inner_result_list)[j]<- levels(input_df_method$method)[j]
+  }
+  assort_results_list[[i]] <- inner_result_list
+  names(assort_results_list)[i] <- levels(edge_list_df_wtaxa$study)[i]
+}
+# clean-up the list and put together the data frames
+
+df_list <- vector(mode = "list", length = length(assort_results_list))
+for(i in seq_along(assort_results_list)){
+  df_list[[i]] <- df_return(assort_results_list[[i]]) 
+  names(df_list)[i]<-names(assort_results_list)[i]
+}
+
+assort_results_df <- bind_rows(df_list, .id = "study")
+
+# create dummy ORest values by replacing Inf
+assort_results_df <- assort_results_df %>%
+  mutate(OR_est_wdummy = if_else(OR_est==Inf, 99, OR_est)) %>%
+  mutate(lOR_est_wdummy = log(OR_est_wdummy),
+         significant = if_else(OR_p.value <=0.05, T, F)) 
+
+# plot, studies are pooled
+ggplot(assort_results_df, mapping = aes(x = assort_test, y = lOR_est_wdummy, colour = significant)) +
+  facet_wrap(~method) +
+  geom_jitter(width = 0.2) +
+  labs(y = "odds ratio")
+
+rm(assort_results_list, input_df_study, inner_result_list, input_df_method, i, j, df_list)
+
+if(play_audio) beep(sound = 6)
+if(keep_time) toc()
+
+```
+Even if the odds ratios are very high in some cases (actually Inf, due to division by 0) they are not significant. My conclusion is that there is not sufficient support for the occurrence of taxonomic assortativity (i.e. for a significantly higher probability of having a copresence link between members of the same family).  
+Similar results can be obtained when looking at the order and class level.  
+
+
+# Citations and copyright.  
+
+## Citations.  
+
+Citations for the metataxonomic studies used in this analysis are in the study_metadata data frame (if any). The main package used in this analysis is NetCoMi, and of course, Phyloseq. Citations for all packages are below.
+
+```{r citations}
+
+all_packages <- c("base", .cran_packages, .bioc_packages, .github_packages)
+map(all_packages, citation)
+
+# for reproducibility you should also run
+# sessionInfo()
+
+
+
+```
+
+## Copyright notice.  
+
+Script created by Eugenio Parente (eugenio.parente@unibas.it), Università degli Studi della Basilicata, 2021
+https://github.com/ep142
+This script has been tested with R 4.0.5 and 4.1 on two different Apple computers with 8 GB RAM running MacOS 10.14.6.  
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:  
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

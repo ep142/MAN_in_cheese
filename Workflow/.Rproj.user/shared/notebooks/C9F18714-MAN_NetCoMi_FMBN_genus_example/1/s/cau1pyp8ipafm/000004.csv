@@ -1,0 +1,3 @@
+"0",""
+"0","loading_report <- tibble( objects_to_process = c(names_list,size_warning))"
+"0","if(verbose_output) print(loading_report)"

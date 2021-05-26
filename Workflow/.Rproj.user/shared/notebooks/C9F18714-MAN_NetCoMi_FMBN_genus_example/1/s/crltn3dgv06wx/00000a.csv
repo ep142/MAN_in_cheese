@@ -1,0 +1,8 @@
+"0","fullnetscores <- cbind(global_all_df_2,PCA1$scores)"
+"0","# the score plot"
+"0","ggplot(fullnetscores, mapping = aes(x = RC1, y = RC2, shape = method, colour = study)) +"
+"0","  geom_point() +"
+"0","  labs(title = ""all variables"") +"
+"0","  scale_shape_manual(values = c(""spieceasi"" = 16, ""spring"" = 17, ""ccrepe"" = 15, ""sparcc"" = 18)) +"
+"0","  scale_color_brewer(type = ""qual"", palette = ""Paired"") +"
+"0","  theme(plot.title = element_text(hjust = 0.5))"
