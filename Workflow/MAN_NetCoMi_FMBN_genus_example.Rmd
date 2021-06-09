@@ -1,6 +1,6 @@
 ---
 title: "Inference and comparison of microbial association networks"
-subtitle: "Inferring networks from FMBN data, genus level, part 3 (and example workflow"
+subtitle: "Inferring networks from FMBN data, genus level: example workflow"
 author: "E. Parente, SAFE"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 output:

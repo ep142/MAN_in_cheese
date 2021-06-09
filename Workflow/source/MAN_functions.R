@@ -195,7 +195,7 @@ filter_by_prev_ab <- function(myphyseq,
                                  prevabtable=NULL)
   # check if any taxon has 0 counts and removes it
   if(any(taxa_sums(myphyseq)==0)){
-    myphyseq <- filter_taxa(myphyseq, function(x) sum(x)>1000, prune = T)
+    myphyseq <- filter_taxa(myphyseq, function(x) sum(x)>0, prune = T)
   }
   # get the option on the OTU table
   taxa_are_rows_flag <- myphyseq@otu_table@taxa_are_rows
