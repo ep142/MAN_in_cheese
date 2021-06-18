@@ -642,7 +642,7 @@ if(play_audio) beep(sound = 6)
 if(keep_time) toc()
 ```
 
-The reduction in number of "taxa" is dramatic in most cases (from 0.010 to 0.21 left), while between 0.984 and 0.999 of the sequences are left.
+The reduction in number of "taxa" is dramatic in most cases (a proportion from 0.010 to 0.21 left), while the proportion of sequences left is between 0.984 and 0.999.
 
 # Inferring the networks.
 
@@ -1202,7 +1202,7 @@ if(keep_time) toc()
 
 Due to the large number of interactions it is hard to discuss the results. In some of the graphs clusters are clearly evident (and could be highlighted by using the cluster id for colors). The structure of the graphs obtained with the different methods for each given dataset is also different. This may be due to the fact that both the correlation based methods may detect indirect interactions.  
 In addition, given the scope of this analysis (with emphasis on nodes and edges conserved across different studies) there is little point in discussing individual networks, because this would require going into detail in the experimental approach used in each study.  
-The following chunk id design to compare network plots build with different methods in a grid. Two of the datasets (chosen because they returned a network for all inference methods and because they had networks of different complexity have been chosen here). However, due to the large number of elements in the graph, plotting all the elements (graph, legend, title) is difficult and may require acting on graphic parameters.  
+The following chunk is designed to compare network plots built with different methods in a grid. Two of the datasets (chosen because they returned a network for all inference methods and because they had networks of different complexity have been chosen here). However, due to the large number of elements in the graph, plotting all the elements (graph, legend, title) is difficult and may require acting on graphic parameters.  
 
 ```{r compare_network_plots, dpi = 96, eval = F}
 if(keep_time) tic("Plotting and saving networks in a grid")
@@ -1234,7 +1234,7 @@ rm(p1, p2, p3, p4, p5, p6, p7, p8)
 # Node analysis.
 
 When comparing networks from several studies it might be of interest to classify nodes on the basis of their measures of centrality across multiple studies: is there a super hub (i.e. a node which i a hub in several networks)? How are different centrality measures related? Are there nodes which engage more often in negative interactions? Of course it would be pointless to compare across several methods of inference or, given the results above, between ASV and FMBN studies (when aggregation at the genus level is used).
-This script will produce a few node plotsas a proof of concept. Both SPIEC-EASI and SparCC will be used on data extracted from FMBN and aggregated at the genus level.
+This script will produce a few node plots as a proof of concept. Both SPIEC-EASI and SparCC will be used on data extracted from FMBN and aggregated at the genus level.
 
 
 
@@ -1340,8 +1340,8 @@ The node plots provide a number of visual cues:
 
 * negative hubs will be located close to the upper left corner; positive hubs will be closer to the right of the plot.  
 
-Even with SPIEC-EASI the number of plotted nodes is high for some studies (but very low for others), and one my consider plotting a given number of nodes (the ones with top degree? top eigenvector centrality?, some combination of both) to simplify the plot.  
-Said that, although beetweenness centrality may be interesting to identify "bottleneck" taxa, looking at betweenness is difficult (the shades of alpha = transparency are visually difficult to separate), but otherwise degree, positive degree and abundance are all easy to visualise.  
+Even with SPIEC-EASI the number of plotted nodes is high for some studies (but very low for others), and one may consider plotting a given number of nodes (the ones with top degree? top eigenvector centrality?, some combination of both) to simplify the plot.  
+Said that, although betweenness centrality may be interesting to identify "bottleneck" taxa, looking at betweenness is difficult (the shades of alpha = transparency are visually difficult to separate), but otherwise degree, positive degree and abundance are all easy to visualise.  
 
 # Edge analysis.  
 
@@ -1460,10 +1460,17 @@ for(i in seq_along(levels(edge_list_df_wtaxa$study))){
     mutate(method = as.factor(method))
   inner_result_list <- vector(mode = "list", length = nlevels(input_df_study$method))
   for(j in seq_along(levels(input_df_study$method))){
-    input_df_method <- input_df_study %>% 
+   input_df_method <- input_df_study %>% 
       mutate(method = as.factor(method)) %>%
       dplyr::filter(method == levels(method)[j])
+    if(verbose_output) cat("\nProcessing", levels(edges_df_wtaxa2$study)[i], 
+                           "method", levels(input_df_method$method)[j],"\n")
     inner_result_list[[j]]<-try(odds_ratio(input_df_method, taxo_level = taxo_level_selection))
+    if(verbose_output & class(inner_result_list[[j]]) == "data.frame") {
+      cat("Success! Odds ratio estimated")
+    } else {
+      cat("\nFail: unable to return test results!")
+    }
     names(inner_result_list)[j]<- levels(input_df_method$method)[j]
   }
   assort_results_list[[i]] <- inner_result_list
@@ -1490,6 +1497,9 @@ ggplot(assort_results_df, mapping = aes(x = assort_test, y = lOR_est_wdummy, col
   facet_wrap(~method) +
   geom_jitter(width = 0.2) +
   labs(y = "odds ratio")
+
+# tabulating
+xtabs(~ method + significant +assort_test , data = assort_results_df)
 
 rm(assort_results_list, input_df_study, inner_result_list, input_df_method, i, j, df_list)
 
