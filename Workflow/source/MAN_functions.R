@@ -564,8 +564,10 @@ merge_stats <- function(tg, node_stats = F, ebetw = calc_e_betw){
 # plot networks -----------------------------------------------------------
 # c0l0r is either phylum or clust_memb
 # this is patchy I should find a way to do it programmatically
+# when clp is off you will avoid cutting some node labels which fall on the border
+# labels are shortened using str_trunc(); you can change the ellipsis argument
 plot_ggraph <- function(tidy_graph, name = "", method = "", 
-                        c0l0r = "phylum", lp = "bottom"){
+                        c0l0r = "phylum", lp = "bottom", clp = "off"){
   g2plot <- tidy_graph %>% 
     activate(nodes) %>%
     mutate(t_deg = pos_degree + neg_degree) %>%
@@ -573,24 +575,25 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
     mutate(clust_memb = as_factor(clust_memb))
   g2plot_title <- paste(name, method, sep = ", ")
   if(c0l0r == "phylum"){
-  # note that using check_overlap = T may remove the names of some nodes
+    # note that using check_overlap = T may remove the names of some nodes
     ggraph_plot <- ggraph(g2plot, layout = 'fr', weights = weight) + 
-    geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
-                   alpha = I(0.5), show.legend = F) + 
-    geom_node_point(mapping = aes(colour = phylum, size = t_deg)) +
-    geom_node_text(mapping = aes(label = str_trunc(genus,15,"center")), check_overlap = F) +
-    labs(title = g2plot_title, size = "degree") +
-    scale_edge_color_manual(values = (c("green","red"))) +
-    scale_edge_width_continuous(range = c(1,4)) +
-    theme_graph() +
-    theme(plot.title = element_text(hjust = 0.5),
-          legend.position = lp)
+      geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
+                     alpha = I(0.5), show.legend = F) + 
+      geom_node_point(mapping = aes(colour = phylum, size = t_deg)) +
+      geom_node_text(mapping = aes(label = str_trunc(name, 15, "center", ellipsis = ".")), check_overlap = F) +
+      labs(title = g2plot_title, size = "degree") +
+      scale_edge_color_manual(values = (c("green","red"))) +
+      scale_edge_width_continuous(range = c(1,4)) +
+      coord_cartesian(clip = clp) +  
+      theme_graph() +
+      theme(plot.title = element_text(hjust = 0.5),
+            legend.position = lp)
   } else {
     ggraph_plot <- ggraph(g2plot, layout = 'fr', weights = weight) + 
       geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
                      alpha = I(0.5), show.legend = F) + 
       geom_node_point(mapping = aes(colour = clust_memb, size = t_deg)) +
-      geom_node_text(mapping = aes(label = str_trunc(genus,15,"center")), check_overlap = F) +
+      geom_node_text(mapping = aes(label = str_trunc(genus, 15, "center", ellipsis = ".")), check_overlap = F) +
       labs(title = g2plot_title, size = "degree") +
       scale_edge_color_manual(values = (c("green","red"))) +
       scale_edge_width_continuous(range = c(1,4)) +
@@ -600,6 +603,7 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
   }
   return(ggraph_plot)
 }
+
 
 
 # oddsratio_assotype ------------------------------------------------------
