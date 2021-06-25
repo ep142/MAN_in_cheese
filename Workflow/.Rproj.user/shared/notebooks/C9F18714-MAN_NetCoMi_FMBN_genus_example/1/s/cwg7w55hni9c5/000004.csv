@@ -1,7 +1,0 @@
-"0",""
-"0","rm(global_props_list_a, global_props_list_l, global_props_list_all, "
-"0","   global_props_list_lcc, all_df, lcc_df, nnodes, ntaxa, nposedge, nnegedge, extra_prop_vector)"
-"0","if(play_audio) beep(sound = 6)"
-"0","if(keep_time) toc()"
-"1","Extraction global network properties: 0.744 sec elapsed
-"

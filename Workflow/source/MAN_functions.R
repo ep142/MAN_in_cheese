@@ -1,7 +1,7 @@
 
 # MAN_functions -----------------------------------------------------------
 
-# v1.3 25/06/2021
+# v1.3.1 25/06/2021
 
 # functions used for the analysis of Microbial association networks
 # this script has to be in the sub-folder source, within the working directory
@@ -624,39 +624,18 @@ odds_ratio <- function(inputdf, taxo_level = "family"){
   colnames(mini_df)[2] <- "same_taxon"
   # copresence
   epi_list_cop <- epiR::epi.2by2(xtabs(~same_taxon + asso_type, data = mini_df))
-  # relevel factors for mutE
-  mini_df_2 <- mini_df %>%
-    mutate(
-      asso_type = factor(asso_type, levels = c("mut_ex", "copres")),
-      same_taxon = factor(as.character(same_taxon))
-    )
-  epi_list_mutE <- epiR::epi.2by2(xtabs(~same_taxon + asso_type, data = mini_df_2))
   # extract in a data frame the Wald incidence risk ratio
-  which_test <- tibble(assort_test = c(str_c("cop_same",taxo_level),
-                                        str_c("mutE_diff",taxo_level)))
   # extracts the appropriate chisq values
   chicop <- if(epi_list_cop$massoc.detail$chi2.correction){
     epi_list_cop$massoc.detail$chi2.strata.yates
   } else {
     epi_list_cop$massoc.detail$chi2.strata.uncor
   }
-  chimutE <- if(epi_list_mutE$massoc.detail$chi2.correction){
-    epi_list_mutE$massoc.detail$chi2.strata.yates
-  } else {
-    epi_list_mutE$massoc.detail$chi2.strata.uncor
-  }
-  OR <- rbind(
-    cbind(epi_list_cop$massoc.detail$OR.strata.wald, chicop),
-    cbind(epi_list_mutE$massoc.detail$OR.strata.wald, chimutE)
-  )
+  OR <- cbind(epi_list_cop$massoc.detail$OR.strata.wald, chicop)
   names(OR) <- str_c("OR", names(OR), sep = "_")
-  RR <- rbind(
-    epi_list_cop$massoc.detail$RR.strata.wald, 
-    epi_list_mutE$massoc.detail$RR.strata.wald
-  )
+  RR <- epi_list_cop$massoc.detail$RR.strata.wald
   names(RR) <- str_c("RR", names(RR), sep = "_")
   assort_results <- cbind(
-    which_test,
     OR,
     RR
   )

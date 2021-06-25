@@ -1509,15 +1509,14 @@ assort_results_df <- assort_results_df %>%
          significant = if_else(OR_p.value.1s <=0.05, T, F)) 
 
 # plot, studies are pooled
-ggplot(assort_results_df, mapping = aes(x = assort_test, y = lOR_est_wdummy, colour = significant)) +
-  facet_wrap(~method) +
+ggplot(assort_results_df, mapping = aes(x = method, y = lOR_est_wdummy, colour = significant)) +
   geom_jitter(width = 0.2) +
   labs(y = "log(odds ratio)") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # tabulating
-xtabs(~ method + significant +assort_test , data = assort_results_df)
+xtabs(~ method + significant , data = assort_results_df)
 
 rm(assort_results_list, input_df_study, inner_result_list, input_df_method, i, j, df_list)
 
