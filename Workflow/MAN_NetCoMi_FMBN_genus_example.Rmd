@@ -1,5 +1,5 @@
 ---
-title: "Inference and comparison of microbial association networks"
+title: "Inference and comparison of microbial association networks v1.3"
 subtitle: "Inferring networks from FMBN data, genus level: example workflow"
 author: "E. Parente, SAFE"
 date: "`r format(Sys.time(), '%d %B %Y')`"
@@ -1400,7 +1400,24 @@ ggplot(slice_to_plot,
   labs(x = "edge", y = "edge betweenness quantile",
       size = "edge freq.") +
     scale_colour_manual(values = c("green","red"))
+
+
+# another way to see it, based on stability
+slice_to_plot_2 <- slice(edge_freq_bystudy_FMBN, 1:50) %>%
+    mutate(edge_name = forcats::fct_reorder(edge_name, n))
+
+ggplot(slice_to_plot_2, 
+       mapping = aes(x = edge_name, y = n, size = med_ebq, color = asso_type)) +
+  geom_point() + 
+  coord_flip() +
+  labs(x = "edge", y = "edge freq.",
+      size = str_wrap("edge betweenness quantile", 15)) +
+    scale_colour_manual(values = c("green","red"))
+
+fn <- paste(file.path(output_folder,out_filename_pref), "_edge_n.tiff",sep="")
+ggsave(filename = fn, dpi = 600, width = 10, height = 7)
 ```
+
 Many of the most stable edges include gut bacteria and probably represent cluster of interactions from this environment which are carried over to milk and then, possibly, cheese (some studies analyzed here include also environmental samples, like feces).  
 The analysis here was carried out by groping by dataset and association type, therefore the frequency is by dataset and a frequency of 4 indicates that a given edge was detected by all 4 methods in a single dataset. The code can be easily modified to detect edges which are conserved across different studies and different methods.
 I will now try to estimate the taxonomic assortativity. To do this, the odds ratio (OR) for copresence links (given that the nodes belong to the same family) and mutual exlusion links (given that the nodes belong to different families) is calculated and the significance is evaluated using `epi.2by2()` function.  
@@ -1461,13 +1478,12 @@ for(i in seq_along(levels(edge_list_df_wtaxa$study))){
   inner_result_list <- vector(mode = "list", length = nlevels(input_df_study$method))
   for(j in seq_along(levels(input_df_study$method))){
    input_df_method <- input_df_study %>% 
-      mutate(method = as.factor(method)) %>%
       dplyr::filter(method == levels(method)[j])
-    if(verbose_output) cat("\nProcessing", levels(edges_df_wtaxa2$study)[i], 
+    if(verbose_output) cat("\nProcessing", levels(edge_list_df_wtaxa$study)[i], 
                            "method", levels(input_df_method$method)[j],"\n")
     inner_result_list[[j]]<-try(odds_ratio(input_df_method, taxo_level = taxo_level_selection))
     if(verbose_output & class(inner_result_list[[j]]) == "data.frame") {
-      cat("Success! Odds ratio estimated")
+      cat("\nSuccess! Odds ratio estimated")
     } else {
       cat("\nFail: unable to return test results!")
     }
@@ -1490,13 +1506,15 @@ assort_results_df <- bind_rows(df_list, .id = "study")
 assort_results_df <- assort_results_df %>%
   mutate(OR_est_wdummy = if_else(OR_est==Inf, 99, OR_est)) %>%
   mutate(lOR_est_wdummy = log(OR_est_wdummy),
-         significant = if_else(OR_p.value <=0.05, T, F)) 
+         significant = if_else(OR_p.value.1s <=0.05, T, F)) 
 
 # plot, studies are pooled
 ggplot(assort_results_df, mapping = aes(x = assort_test, y = lOR_est_wdummy, colour = significant)) +
   facet_wrap(~method) +
   geom_jitter(width = 0.2) +
-  labs(y = "odds ratio")
+  labs(y = "log(odds ratio)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # tabulating
 xtabs(~ method + significant +assort_test , data = assort_results_df)

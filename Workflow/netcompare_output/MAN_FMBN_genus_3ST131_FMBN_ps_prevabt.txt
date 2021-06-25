@@ -1,4 +1,0 @@
-label	Prevalence	TotalAbundance	min_rel_ab	max_rel_ab	domain	phylum	class	order	family	genus	species	relAbundance	pass_filters	relprev
-Lactococcus	107	376010	0.2592777396619472	1	Bacteria	Firmicutes	Bacilli	Lactobacillales	Streptococcaceae	Lactococcus	NA	0.5204276251138406	T	1
-Streptococcus	105	344408	0	0.7365433792802345	Bacteria	Firmicutes	Bacilli	Lactobacillales	Streptococcaceae	Streptococcus	NA	0.47668795380497214	T	0.9813084112149533
-Lactobacillus complex	28	2084	0	0.04678362573099415	Bacteria	Firmicutes	Bacilli	Lactobacillales	Lactobacillaceae	Lactobacillus complex	NA	0.0028844210811873184	T	0.2616822429906542

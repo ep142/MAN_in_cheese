@@ -1,6 +1,0 @@
-label	Prevalence	TotalAbundance	min_rel_ab	max_rel_ab	domain	phylum	class	order	family	genus	species	relAbundance	pass_filters	relprev
-Lactococcus	34	3078335	0.008088769055273256	0.9998325625896987	Bacteria	Firmicutes	Bacilli	Lactobacillales	Streptococcaceae	Lactococcus	NA	0.9883948487050322	T	1
-Leuconostoc	34	20328	1.6743741030138734e-4	0.16195190947666196	Bacteria	Firmicutes	Bacilli	Lactobacillales	Lactobacillaceae	Leuconostoc	NA	0.006526934360450014	T	1
-Staphylococcus	10	3784	0	0.13263507207300632	Bacteria	Firmicutes	Bacilli	Staphylococcales	Staphylococcaceae	Staphylococcus	NA	0.001214970465365154	T	0.29411764705882354
-Psychrobacter	8	10874	0	0.8547132635072073	Bacteria	Proteobacteria	Gammaproteobacteria	Pseudomonadales	Moraxellaceae	Psychrobacter	NA	0.0034914346829758684	T	0.23529411764705882
-Acaricomes	3	1158	0	0.01906343267896927	Bacteria	Actinobacteriota	Actinobacteria	Micrococcales	Micrococcaceae	Acaricomes	NA	3.71811786176757e-4	T	0.08823529411764706

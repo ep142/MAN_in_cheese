@@ -1,7 +1,7 @@
 
 # MAN_functions -----------------------------------------------------------
 
-# v1.2 25/05/2021
+# v1.3 25/06/2021
 
 # functions used for the analysis of Microbial association networks
 # this script has to be in the sub-folder source, within the working directory
@@ -564,8 +564,6 @@ merge_stats <- function(tg, node_stats = F, ebetw = calc_e_betw){
 # plot networks -----------------------------------------------------------
 # c0l0r is either phylum or clust_memb
 # this is patchy I should find a way to do it programmatically
-# when clp is off you will avoid cutting some node labels which fall on the border
-# labels are shortened using str_trunc(); you can change the ellipsis argument
 plot_ggraph <- function(tidy_graph, name = "", method = "", 
                         c0l0r = "phylum", lp = "bottom", clp = "off"){
   g2plot <- tidy_graph %>% 
@@ -575,25 +573,25 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
     mutate(clust_memb = as_factor(clust_memb))
   g2plot_title <- paste(name, method, sep = ", ")
   if(c0l0r == "phylum"){
-    # note that using check_overlap = T may remove the names of some nodes
+  # note that using check_overlap = T may remove the names of some nodes
     ggraph_plot <- ggraph(g2plot, layout = 'fr', weights = weight) + 
-      geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
-                     alpha = I(0.5), show.legend = F) + 
-      geom_node_point(mapping = aes(colour = phylum, size = t_deg)) +
-      geom_node_text(mapping = aes(label = str_trunc(name, 15, "center", ellipsis = ".")), check_overlap = F) +
-      labs(title = g2plot_title, size = "degree") +
-      scale_edge_color_manual(values = (c("green","red"))) +
-      scale_edge_width_continuous(range = c(1,4)) +
-      coord_cartesian(clip = clp) +  
-      theme_graph() +
-      theme(plot.title = element_text(hjust = 0.5),
-            legend.position = lp)
+    geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
+                   alpha = I(0.5), show.legend = F) + 
+    geom_node_point(mapping = aes(colour = phylum, size = t_deg)) +
+    geom_node_text(mapping = aes(label = str_trunc(name, 15,"center", ellipsis = ".")), check_overlap = F) +
+    labs(title = g2plot_title, size = "degree") +
+    scale_edge_color_manual(values = (c("green","red"))) +
+    scale_edge_width_continuous(range = c(1,4)) +
+    coord_cartesian(clip = clp) +  
+    theme_graph() +
+    theme(plot.title = element_text(hjust = 0.5),
+          legend.position = lp)
   } else {
     ggraph_plot <- ggraph(g2plot, layout = 'fr', weights = weight) + 
       geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
                      alpha = I(0.5), show.legend = F) + 
       geom_node_point(mapping = aes(colour = clust_memb, size = t_deg)) +
-      geom_node_text(mapping = aes(label = str_trunc(genus, 15, "center", ellipsis = ".")), check_overlap = F) +
+      geom_node_text(mapping = aes(label = str_trunc(genus,15,"center", ellipsis = ".")), check_overlap = F) +
       labs(title = g2plot_title, size = "degree") +
       scale_edge_color_manual(values = (c("green","red"))) +
       scale_edge_width_continuous(range = c(1,4)) +
@@ -605,15 +603,19 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
 }
 
 
-
 # oddsratio_assotype ------------------------------------------------------
 
 # A function to calculate odds ratio for copresence and mutual exclusion
 # associations as a function of taxonomic relationships of the two nodes
-# connected by an association edge. Takes a data frame extracted from the edge 
-# data frame and returns a list??
+# connected by an association edge. 
+# Known issues: epi2by2() function has changed with epiR 2.0.26; 
+# The odds ratio function
 
 odds_ratio <- function(inputdf, taxo_level = "family"){
+  epiR_version <- packageVersion("epiR")
+  if(epiR_version < "2.0.26"){
+    stop("\nYou must update epiR to version 2.0.26 or higher!")
+  }
   mini_df <- switch(taxo_level,
                     family = select(inputdf, asso_type, sf),
                     order = select(inputdf, asso_type, so),
@@ -632,14 +634,25 @@ odds_ratio <- function(inputdf, taxo_level = "family"){
   # extract in a data frame the Wald incidence risk ratio
   which_test <- tibble(assort_test = c(str_c("cop_same",taxo_level),
                                         str_c("mutE_diff",taxo_level)))
+  # extracts the appropriate chisq values
+  chicop <- if(epi_list_cop$massoc.detail$chi2.correction){
+    epi_list_cop$massoc.detail$chi2.strata.yates
+  } else {
+    epi_list_cop$massoc.detail$chi2.strata.uncor
+  }
+  chimutE <- if(epi_list_mutE$massoc.detail$chi2.correction){
+    epi_list_mutE$massoc.detail$chi2.strata.yates
+  } else {
+    epi_list_mutE$massoc.detail$chi2.strata.uncor
+  }
   OR <- rbind(
-    cbind(epi_list_cop$res$OR.crude.wald, epi_list_cop$res$chisq.crude),
-    cbind(epi_list_mutE$res$OR.crude.wald, epi_list_mutE$res$chisq.crude)
+    cbind(epi_list_cop$massoc.detail$OR.strata.wald, chicop),
+    cbind(epi_list_mutE$massoc.detail$OR.strata.wald, chimutE)
   )
   names(OR) <- str_c("OR", names(OR), sep = "_")
   RR <- rbind(
-    epi_list_cop$res$RR.crude.wald, 
-    epi_list_mutE$res$RR.crude.wald
+    epi_list_cop$massoc.detail$RR.strata.wald, 
+    epi_list_mutE$massoc.detail$RR.strata.wald
   )
   names(RR) <- str_c("RR", names(RR), sep = "_")
   assort_results <- cbind(
