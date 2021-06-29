@@ -1,7 +1,7 @@
 
 # MAN_functions -----------------------------------------------------------
 
-# v1.3.1 25/06/2021
+# v1.3.2 25/06/2021
 
 # functions used for the analysis of Microbial association networks
 # this script has to be in the sub-folder source, within the working directory
@@ -563,9 +563,10 @@ merge_stats <- function(tg, node_stats = F, ebetw = calc_e_betw){
 
 # plot networks -----------------------------------------------------------
 # c0l0r is either phylum or clust_memb
+# a sets alpha for the names of the nodes
 # this is patchy I should find a way to do it programmatically
 plot_ggraph <- function(tidy_graph, name = "", method = "", 
-                        c0l0r = "phylum", lp = "bottom", clp = "off"){
+                        c0l0r = "phylum", lp = "bottom", clp = "off", a =0.6){
   g2plot <- tidy_graph %>% 
     activate(nodes) %>%
     mutate(t_deg = pos_degree + neg_degree) %>%
@@ -578,7 +579,7 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
     geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
                    alpha = I(0.5), show.legend = F) + 
     geom_node_point(mapping = aes(colour = phylum, size = t_deg)) +
-    geom_node_text(mapping = aes(label = str_trunc(name, 15,"center", ellipsis = ".")), check_overlap = F) +
+    geom_node_text(mapping = aes(label = str_trunc(name, 15,"center", ellipsis = ".")), check_overlap = F, alpha = a) +
     labs(title = g2plot_title, size = "degree") +
     scale_edge_color_manual(values = (c("green","red"))) +
     scale_edge_width_continuous(range = c(1,4)) +
