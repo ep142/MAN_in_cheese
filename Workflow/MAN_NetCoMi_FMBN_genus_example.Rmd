@@ -773,7 +773,7 @@ for (i in seq_along(net_stats)){
     if(class(net_stats[[i]][[j]])!= "microNetProps"){
       next
     } else{
-      nnodes <- sum(net_stats[[i]][[j]]$centralities$degree1>0)
+      nnodes <- sum(net_stats[[i]][[j]]$input$assoMat1!=0)-nrow(net_stats[[i]][[j]]$input$assoMat1)
       ntaxa <- nrow(net_stats[[i]][[j]]$input$assoMat1)
       nposedge <- sum(net_stats[[i]][[j]]$input$assoMat1[lower.tri(net_stats[[i]][[j]]$input$assoMat1)]>0)
       nnegedge <- sum(net_stats[[i]][[j]]$input$assoMat1[lower.tri(net_stats[[i]][[j]]$input$assoMat1)]<0)
