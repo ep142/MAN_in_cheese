@@ -20,4 +20,5 @@ Comments and suggestions are welcome.
 **Known issues**  
 
 The epiR::epi.2by2() changed recently (June 1st, 2021). If the odds_ratio() function does not work, this is the likely culprit.  
-The function will therefore throw an error if epiR version is <2.0.26 but I cannot guarantee what happens in the future.  
+The function will therefore throw an error if epiR version is <2.0.26 but I cannot guarantee what happens in the future.
+There is also apparently a problem with the netAnalyze() function of version 1.0.2 of NetCoMi which apparently miscalculates node degree. I have changed the functions in the source file and the code to keep this into account but I have not removed the degree calculated by NetCoMi in case it gets fixed in the future.

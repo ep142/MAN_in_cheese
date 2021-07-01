@@ -1,7 +1,7 @@
 
 # MAN_functions -----------------------------------------------------------
 
-# v1.3.2 25/06/2021
+# v1.3.3 01/07/2021
 
 # functions used for the analysis of Microbial association networks
 # this script has to be in the sub-folder source, within the working directory
@@ -545,6 +545,7 @@ microNet_to_tidygraph <- function(micronet_obj,
 # A function for calculating edge stats (here it does only centrality_edge_betweennes)
 # takes a tidygraph object and a further argument which is either a logical or a data frame
 # with node stats to be merged with nodes. Returns a modified tidygraph object
+# tot_degree is calculated from pos_degree+neg_degree
 merge_stats <- function(tg, node_stats = F, ebetw = calc_e_betw){
   if(!is.tbl_graph(tg)) stop("This is not a tidygraph")
   if(ebetw){
@@ -555,7 +556,8 @@ merge_stats <- function(tg, node_stats = F, ebetw = calc_e_betw){
     # renaming a bariable befor joining
     node_stats <- node_stats %>% rename(name = label)
     tg <- tg %>% activate(nodes) %>%
-      left_join(.,node_stats)
+      left_join(.,node_stats) %>%
+      mutate(tot_degree = pos_degree+neg_degree)
   }
   return(tg)
 }
@@ -569,7 +571,6 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
                         c0l0r = "phylum", lp = "bottom", clp = "off", a =0.6){
   g2plot <- tidy_graph %>% 
     activate(nodes) %>%
-    mutate(t_deg = pos_degree + neg_degree) %>%
     dplyr::filter(pos_degree>0 | neg_degree>0) %>%
     mutate(clust_memb = as_factor(clust_memb))
   g2plot_title <- paste(name, method, sep = ", ")
@@ -578,7 +579,7 @@ plot_ggraph <- function(tidy_graph, name = "", method = "",
     ggraph_plot <- ggraph(g2plot, layout = 'fr', weights = weight) + 
     geom_edge_link(mapping = aes(edge_colour = asso_type, edge_width = weight),
                    alpha = I(0.5), show.legend = F) + 
-    geom_node_point(mapping = aes(colour = phylum, size = t_deg)) +
+    geom_node_point(mapping = aes(colour = phylum, size = tot_degree)) +
     geom_node_text(mapping = aes(label = str_trunc(name, 15,"center", ellipsis = ".")), check_overlap = F, alpha = a) +
     labs(title = g2plot_title, size = "degree") +
     scale_edge_color_manual(values = (c("green","red"))) +
