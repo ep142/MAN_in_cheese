@@ -371,12 +371,14 @@ infer_MAN <- function(myphyseq, inf_method, method_parameters){
 # calculates net stats if possible, otherwise returns a try-error object. 
 # I am just using defaults for most parameters, 
 # in the future I might want to set more parameters
+# note that centralities are calculated for the LCC by default which
+# is the most reasonable choice; if you want to change that, set lcc to FALSE
 
-calculate_net_stats <- function(microNet_obj, verbosePar = 1){
+calculate_net_stats <- function(microNet_obj, verbosePar = 1, lcc = TRUE){
   netstats <- try(
     netAnalyze(
       microNet_obj,
-      centrLCC = TRUE,
+      centrLCC = lcc,
       avDissIgnoreInf = FALSE,
       sPathAlgo = "dijkstra",
       sPathNorm = TRUE,

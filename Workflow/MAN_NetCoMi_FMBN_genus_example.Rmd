@@ -750,6 +750,8 @@ for(i in seq_along(MAN_inf_results)){
     mthd <- names(MAN_inf_results[[i]])[j]
     if(verbose_output) cat("method",mthd,"\n")
     # consider reducing argument hubQuant to 0.75-0.90 default is 0.95),
+    # note that centralities are calculated for the LCC by default which
+    # is the most reasonable choice; if you want to change that, set lcc to FALSE
     net_stat_results[[j]] <- calculate_net_stats(MAN_inf_results[[i]][[j]])
   }
   names(net_stat_results)<-names(MAN_inf_results[[i]])
